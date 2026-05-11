@@ -11,6 +11,7 @@ export class WhatsappController {
 
   @Post('send-message')
   async sendMessage(@Body() dto: SendMessageDto) {
+    console.log('[Controller] POST /whatsapp/send-message - to:', dto.to);
     this.logger.log(`[Controller] POST /whatsapp/send-message - to: ${dto.to}`);
     
     if (!dto.to || !dto.message) {
@@ -18,18 +19,22 @@ export class WhatsappController {
     }
 
     const result = await this.whatsappService.sendMessage(dto.to, dto.message);
+    console.log('[Controller] Message sent result:', result);
     return result;
   }
 
   @Post('meta/signup/start')
   async startSignup(@Body() dto: SignupStartDto) {
+    console.log('[Controller] POST /whatsapp/meta/signup/start');
     this.logger.log('[Controller] POST /whatsapp/meta/signup/start');
     const result = await this.whatsappService.startSignup();
+    console.log('[Controller] Signup start result:', result);
     return result;
   }
 
   @Post('meta/signup/callback')
   async handleCallback(@Body() dto: SignupCallbackDto) {
+    console.log('[Controller] POST /whatsapp/meta/signup/callback - code:', dto.code);
     this.logger.log(`[Controller] POST /whatsapp/meta/signup/callback - code: ${dto.code}`);
     
     if (!dto.code) {
@@ -37,6 +42,7 @@ export class WhatsappController {
     }
 
     const result = await this.whatsappService.handleCallback(dto.code, dto.state);
+    console.log('[Controller] Callback result:', result);
     return result;
   }
 
@@ -47,6 +53,7 @@ export class WhatsappController {
     @Query('hub.challenge') challenge: string,
     @Res() res: Response,
   ) {
+    console.log('[Controller] GET /whatsapp/meta/webhook - mode:', mode, 'token:', token);
     this.logger.log(`[Controller] GET /whatsapp/meta/webhook - mode: ${mode}, token: ${token}`);
     
     if (!mode || !token || !challenge) {
@@ -54,6 +61,7 @@ export class WhatsappController {
     }
 
     const result = await this.whatsappService.verifyWebhook(mode, token, challenge);
+    console.log('[Controller] Webhook verification result:', result);
     
     if (result.error) {
       return res.status(HttpStatus.FORBIDDEN).send(result.error);
@@ -65,8 +73,10 @@ export class WhatsappController {
   @Post('meta/webhook')
   @HttpCode(HttpStatus.OK)
   async handleWebhook(@Body() payload: any) {
+    console.log('[Controller] POST /whatsapp/meta/webhook - payload:', payload);
     this.logger.log('[Controller] POST /whatsapp/meta/webhook');
     const result = await this.whatsappService.handleWebhook(payload);
+    console.log('[Controller] Webhook handle result:', result);
     return result;
   }
 }

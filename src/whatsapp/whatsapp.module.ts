@@ -1,13 +1,20 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { WhatsappController } from './whatsapp.controller';
 import { WhatsappService } from './whatsapp.service';
-import { WhatsAppProviderFactory } from './providers/whatsapp-provider.factory';
+import { WhatsappController } from './whatsapp.controller';
+import { MessageBirdProvider } from './providers/messagebird/messagebird.provider';
+import { MetaProvider } from './providers/meta/meta.provider';
+import { MetaModule } from './providers/meta/meta.module';
+import { WhatsAppProviderFactory } from './factory/whatsapp-provider.factory';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [MetaModule],
   controllers: [WhatsappController],
-  providers: [WhatsappService, WhatsAppProviderFactory],
-  exports: [WhatsappService],
+  providers: [
+    WhatsappService,
+    MessageBirdProvider,
+    MetaProvider,
+    WhatsAppProviderFactory,
+  ],
+  exports: [WhatsAppProviderFactory],
 })
 export class WhatsappModule {}

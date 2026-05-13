@@ -1,0 +1,305 @@
+{
+  "info": {
+    "_postman_id": "whatsapp-meta-mock-api",
+    "name": "WhatsApp Meta Mock API",
+    "description": "Complete collection for testing WhatsApp Meta Mock Integration Backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Get Health Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Basic health check endpoint"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Appointments",
+      "item": [
+        {
+          "name": "Create Appointment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patientName\": \"Manju Kumari\",\n  \"phoneNumber\": \"919999999999\",\n  \"appointmentDate\": \"2026-05-15\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/appointments",
+              "host": ["{{base_url}}"],
+              "path": ["appointments"]
+            },
+            "description": "Create a new appointment and send WhatsApp notification"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Templates",
+      "item": [
+        {
+          "name": "Send Confirmation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateName\": \"appointment_confirmation\",\n  \"patientName\": \"Manju Kumari\",\n  \"doctorName\": \"Dr. Jatin Das\",\n  \"appointmentDate\": \"2026-05-15\",\n  \"appointmentTime\": \"10:30 AM\",\n  \"hospitalName\": \"BMR Hospital\",\n  \"phoneNumber\": \"919999999999\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/templates/confirmation",
+              "host": ["{{base_url}}"],
+              "path": ["templates", "confirmation"]
+            },
+            "description": "Send appointment confirmation template"
+          },
+          "response": []
+        },
+        {
+          "name": "Send Reminder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateName\": \"appointment_reminder\",\n  \"patientName\": \"Manju Kumari\",\n  \"doctorName\": \"Dr. Jatin Das\",\n  \"appointmentDate\": \"2026-05-15\",\n  \"appointmentTime\": \"10:30 AM\",\n  \"hospitalName\": \"BMR Hospital\",\n  \"phoneNumber\": \"919999999999\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/templates/reminder",
+              "host": ["{{base_url}}"],
+              "path": ["templates", "reminder"]
+            },
+            "description": "Send appointment reminder template"
+          },
+          "response": []
+        },
+        {
+          "name": "Send Cancellation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateName\": \"appointment_cancellation\",\n  \"patientName\": \"Manju Kumari\",\n  \"doctorName\": \"Dr. Jatin Das\",\n  \"appointmentDate\": \"2026-05-15\",\n  \"appointmentTime\": \"10:30 AM\",\n  \"hospitalName\": \"BMR Hospital\",\n  \"phoneNumber\": \"919999999999\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/templates/cancellation",
+              "host": ["{{base_url}}"],
+              "path": ["templates", "cancellation"]
+            },
+            "description": "Send appointment cancellation template"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Template Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/templates/status/{{messageId}}",
+              "host": ["{{base_url}}"],
+              "path": ["templates", "status", "{{messageId}}"]
+            },
+            "description": "Get template message delivery status"
+          },
+          "response": []
+        },
+        {
+          "name": "Handle Delivery Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageId\": \"meta-tmpl-abc-123\",\n  \"status\": \"DELIVERED\",\n  \"failureReason\": null\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/templates/webhook/delivery",
+              "host": ["{{base_url}}"],
+              "path": ["templates", "webhook", "delivery"]
+            },
+            "description": "Simulate template delivery status webhook event"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Meta Integration",
+      "item": [
+        {
+          "name": "Start Signup Flow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"businessId\": \"mock-business-123\",\n  \"businessName\": \"Test Clinic\",\n  \"phoneNumber\": \"919999999999\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/meta/signup/start",
+              "host": ["{{base_url}}"],
+              "path": ["meta", "signup", "start"]
+            },
+            "description": "Start mock Meta Embedded Signup flow"
+          },
+          "response": []
+        },
+        {
+          "name": "Signup Callback - Success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fail\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/meta/signup/callback",
+              "host": ["{{base_url}}"],
+              "path": ["meta", "signup", "callback"]
+            },
+            "description": "Mock Meta signup callback - successful"
+          },
+          "response": []
+        },
+        {
+          "name": "Signup Callback - Failure",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fail\": true,\n  \"errorCode\": \"ACCESS_DENIED\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/meta/signup/callback",
+              "host": ["{{base_url}}"],
+              "path": ["meta", "signup", "callback"]
+            },
+            "description": "Mock Meta signup callback - failure scenario"
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Webhook",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/meta/webhook?hub.mode=subscribe&hub.verify_token=mock_verify_token&hub.challenge=challenge-abc-123",
+              "host": ["{{base_url}}"],
+              "path": ["meta", "webhook"],
+              "query": [
+                {
+                  "key": "hub.mode",
+                  "value": "subscribe"
+                },
+                {
+                  "key": "hub.verify_token",
+                  "value": "mock_verify_token"
+                },
+                {
+                  "key": "hub.challenge",
+                  "value": "challenge-abc-123"
+                }
+              ]
+            },
+            "description": "Mock Meta webhook verification"
+          },
+          "response": []
+        },
+        {
+          "name": "Handle Webhook Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object\": \"whatsapp_business_account\",\n  \"entry\": [\n    {\n      \"id\": \"mock-business-account-id\",\n      \"changes\": [\n        {\n          \"value\": {\n            \"messaging_product\": \"whatsapp\",\n            \"metadata\": {\n              \"display_phone_number\": \"mock-display-phone-number\",\n              \"phone_number_id\": \"mock-phone-number-id\"\n            },\n            \"messages\": [\n              {\n                \"from\": \"919999999999\",\n                \"id\": \"wamid.mock-message-id-001\",\n                \"type\": \"text\",\n                \"text\": {\n                  \"body\": \"Appointment Confirmed for 2026-05-15\"\n                }\n              }\n            ]\n          },\n          \"field\": \"messages\"\n        }\n      ]\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/meta/webhook",
+              "host": ["{{base_url}}"],
+              "path": ["meta", "webhook"]
+            },
+            "description": "Mock Meta webhook event - incoming message"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "messageId",
+      "value": "meta-tmpl-abc-123",
+      "type": "string"
+    }
+  ]
+}

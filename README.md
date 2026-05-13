@@ -1,981 +1,344 @@
-# 📋 WhatsApp Meta Mock Integration API - Comprehensive Implementation Plan
+# WhatsApp Appointment Notification API
 
-## 🏗️ **Project Overview**
-This is a **NestJS-based WhatsApp Meta Mock Integration API** designed to simulate Meta's Embedded Signup flow and WhatsApp template message management for healthcare appointment scheduling.
+A production-ready NestJS service for managing WhatsApp appointment notifications with template messaging, provider failover, and webhook verification.
 
-## 🏛️ **Architecture & Tech Stack**
+## Overview
 
-### **Core Technologies**
-- **Framework:** NestJS (Node.js)
-- **Database:** PostgreSQL with TypeORM
-- **Validation:** class-validator + class-transformer
-- **Documentation:** Swagger/OpenAPI
-- **Configuration:** @nestjs/config
-- **Testing:** Jest + Supertest
+This API provides endpoints for creating appointments with automatic WhatsApp confirmation delivery, sending template messages for reminders and cancellations, handling provider failover between Meta WhatsApp and MessageBird, and processing webhook events for delivery status updates.
 
-### **Project Structure**
-```
-src/
-├── app/                    # Root application module
-├── appointment/           # Appointment management
-├── template/             # WhatsApp template messages
-├── whatsapp/             # WhatsApp provider abstraction
-│   ├── providers/        # Provider implementations
-│   │   ├── interfaces/   # Provider contracts
-│   │   ├── meta/         # Meta WhatsApp provider
-│   │   └── messagebird/  # MessageBird provider
-│   ├── factory/          # Provider factory
-│   └── enums/            # Provider enums
-└── main.ts               # Application bootstrap
-```
+Key features:
+- Appointment creation with WhatsApp template notifications
+- Template messaging for confirmations, reminders, and cancellations
+- Automatic provider failover and retry logic
+- Meta webhook verification and signature validation
+- Delivery status tracking and persistence
 
-## 📊 **Database Design**
+## Architecture
 
-### **Entities Overview**
+The service is built with:
+- **AppointmentController/Service**: Handles appointment creation and WhatsApp notifications
+- **TemplateController/Service**: Manages template message sending and delivery status
+- **MetaController/Service**: Provides mock Meta signup flows and webhook handling
+- **WhatsAppProviderFactory**: Selects primary and fallback providers
+- **Provider Implementations**: MetaProvider and MessageBirdProvider for API-specific payloads
 
-#### **1. TemplateMessage Entity**
-```typescript
-// src/template/entities/template-message.entity.ts
-@Entity()
-export class TemplateMessage {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
+## Setup Instructions
 
-  @Column()
-  messageId: string; // Unique message identifier
+### Prerequisites
+- Node.js 18+
+- PostgreSQL 12+
+- npm
 
-  @Column()
-  provider: string; // META_WHATSAPP or MESSAGE_BIRD
-
-  @Column({ type: 'enum', enum: TemplateType })
-  templateName: TemplateType;
-
-  // Patient & appointment details
-  @Column() patientName: string;
-  @Column() doctorName: string;
-  @Column() hospitalName: string;
-  @Column() appointmentDate: string;
-  @Column() appointmentTime: string;
-  @Column() phoneNumber: string;
-
-  // Status tracking
-  @Column({ type: 'enum', enum: TemplateStatus, default: TemplateStatus.SENT })
-  status: TemplateStatus;
-
-  @Column({ nullable: true })
-  failureReason: string;
-
-  @Column({ default: 0 })
-  retryCount: number;
-
-  @CreateDateColumn() createdAt: Date;
-  @UpdateDateColumn() updatedAt: Date;
-}
-```
-
-#### **2. SignupState Entity**
-```typescript
-// src/whatsapp/providers/meta/entities/signup-state.entity.ts
-@Entity()
-export class SignupState {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ unique: true })
-  state: string; // OAuth state token
-
-  @Column() businessId: string;
-  @Column() businessName: string;
-  @Column() phoneNumber: string;
-
-  @Column() expiresAt: Date;
-  @CreateDateColumn() createdAt: Date;
-}
-```
-
-#### **3. WhatsAppIntegration Entity**
-```typescript
-// src/whatsapp/entities/whatsapp-integration.entity.ts
-@Entity()
-export class WhatsAppIntegration {
-  @PrimaryGeneratedColumn()
-  id: number;
-
-  @Column() provider: string;
-  @Column() businessId: string;
-  @Column() phoneNumberId: string;
-  @Column() wabaId: string;
-  @Column() accessToken: string;
-}
-```
-
-## 🔧 **Implementation Phases**
-
-### **Phase 1: Core Infrastructure Setup**
-
-#### **1.1 Project Initialization**
+### Installation
 ```bash
-# Initialize NestJS project
-nest new whatsapp-meta-mock --package-manager npm
-
-# Install core dependencies
-npm install @nestjs/config @nestjs/typeorm typeorm pg class-validator class-transformer @nestjs/swagger swagger-ui-express
-
-# Install dev dependencies
-npm install -D @types/node typescript eslint prettier jest supertest
-```
-
-#### **1.2 Environment Configuration**
-```typescript
-// .env
-DB_HOST=localhost
-DB_PORT=5432
-DB_USERNAME=postgres
-DB_PASSWORD=postgres
-DB_DATABASE=whatsapp_db
-PORT=3000
-WHATSAPP_PROVIDER=MESSAGE_BIRD  # or META_WHATSAPP
-```
-
-#### **1.3 Database Configuration**
-```typescript
-// src/app.module.ts
-@Module({
-  imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DB_HOST,
-      port: Number(process.env.DB_PORT),
-      username: process.env.DB_USERNAME,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_DATABASE,
-      autoLoadEntities: true,
-      synchronize: true, // ⚠️ Disable in production
-    }),
-    // ... other modules
-  ],
-})
-export class AppModule {}
-```
-
-#### **1.4 Global Validation & Swagger Setup**
-```typescript
-// src/main.ts
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-
-  // Global validation pipes
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-
-  // Swagger documentation
-  const config = new DocumentBuilder()
-    .setTitle('WhatsApp Meta Mock API')
-    .setDescription('Mock Meta Embedded Signup Integration APIs')
-    .setVersion('1.0')
-    .addTag('appointments')
-    .addTag('templates')
-    .addTag('meta')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api-docs', app, document);
-
-  await app.listen(process.env.PORT ?? 3000);
-}
-```
-
-### **Phase 2: WhatsApp Provider Architecture**
-
-#### **2.1 Provider Interface Design**
-```typescript
-// src/whatsapp/providers/interfaces/whatsapp-provider.interface.ts
-export interface ITemplatePayload {
-  patientName: string;
-  doctorName: string;
-  appointmentDate: string;
-  appointmentTime: string;
-  hospitalName: string;
-  phoneNumber: string;
-}
-
-export interface ITemplateMessageResponse {
-  success: boolean;
-  provider: string;
-  messageId: string;
-  to: string;
-  templateName: string;
-  status: 'SENT' | 'DELIVERED' | 'FAILED';
-  sentAt: string;
-}
-
-export interface IWhatsAppProvider {
-  sendAppointmentMessage(payload: any): Promise<any>;
-  sendTemplateMessage(
-    templateName: 'appointment_confirmation' | 'appointment_reminder' | 'appointment_cancellation',
-    payload: ITemplatePayload,
-  ): Promise<ITemplateMessageResponse>;
-}
-```
-
-#### **2.2 Provider Factory Pattern**
-```typescript
-// src/whatsapp/factory/whatsapp-provider.factory.ts
-@Injectable()
-export class WhatsAppProviderFactory {
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly messageBirdProvider: MessageBirdProvider,
-    private readonly metaProvider: MetaProvider,
-  ) {}
-
-  getProvider(): IWhatsAppProvider {
-    const provider = this.configService.get<string>('WHATSAPP_PROVIDER') ?? 'MESSAGE_BIRD';
-
-    switch (provider) {
-      case 'META_WHATSAPP':
-        return this.metaProvider;
-      case 'MESSAGE_BIRD':
-      default:
-        return this.messageBirdProvider;
-    }
-  }
-}
-```
-
-#### **2.3 Meta Provider Implementation**
-```typescript
-// src/whatsapp/providers/meta/meta.provider.ts
-@Injectable()
-export class MetaProvider implements IWhatsAppProvider {
-  private readonly logger = new Logger(MetaProvider.name);
-
-  async sendTemplateMessage(
-    templateName: string,
-    payload: ITemplatePayload,
-  ): Promise<ITemplateMessageResponse> {
-    // Mock Meta WhatsApp API call
-    const messageId = `meta-tmpl-${crypto.randomUUID()}`;
-
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 80));
-
-    return {
-      success: true,
-      provider: 'META_WHATSAPP',
-      messageId,
-      to: payload.phoneNumber,
-      templateName,
-      status: 'SENT',
-      sentAt: new Date().toISOString(),
-    };
-  }
-}
-```
-
-#### **2.4 MessageBird Provider Implementation**
-```typescript
-// src/whatsapp/providers/messagebird/messagebird.provider.ts
-@Injectable()
-export class MessageBirdProvider implements IWhatsAppProvider {
-  // Similar implementation with MessageBird-specific logic
-}
-```
-
-### **Phase 3: Module Implementation**
-
-#### **3.1 WhatsApp Module**
-```typescript
-// src/whatsapp/whatsapp.module.ts
-@Module({
-  imports: [
-    TypeOrmModule.forFeature([WhatsAppIntegration]),
-  ],
-  providers: [
-    WhatsAppProviderFactory,
-    MetaProvider,
-    MessageBirdProvider,
-  ],
-  exports: [WhatsAppProviderFactory],
-})
-export class WhatsappModule {}
-```
-
-#### **3.2 Template Module**
-```typescript
-// src/template/template.module.ts
-@Module({
-  imports: [
-    TypeOrmModule.forFeature([TemplateMessage]),
-    WhatsappModule,
-  ],
-  controllers: [TemplateController],
-  providers: [TemplateService],
-})
-export class TemplateModule {}
-```
-
-#### **3.3 Appointment Module**
-```typescript
-// src/appointment/appointment.module.ts
-@Module({
-  imports: [WhatsappModule],
-  controllers: [AppointmentController],
-  providers: [AppointmentService],
-})
-export class AppointmentModule {}
-```
-
-### **Phase 4: API Endpoints Implementation**
-
-#### **4.1 Appointment Endpoints**
-```typescript
-// src/appointment/appointment.controller.ts
-@ApiTags('appointments')
-@Controller('appointments')
-export class AppointmentController {
-  constructor(private readonly appointmentService: AppointmentService) {}
-
-  @Post()
-  @ApiOperation({ summary: 'Create appointment and send WhatsApp message' })
-  @ApiBody({ type: CreateAppointmentDto })
-  async create(@Body() body: CreateAppointmentDto): Promise<AppointmentResponseDto> {
-    return this.appointmentService.createAppointment(body);
-  }
-}
-```
-
-#### **4.2 Template Endpoints**
-```typescript
-// src/template/template.controller.ts
-@ApiTags('templates')
-@Controller('templates')
-export class TemplateController {
-  constructor(private readonly templateService: TemplateService) {}
-
-  @Post('confirmation')
-  @ApiOperation({ summary: 'Send appointment confirmation template' })
-  @ApiBody({ type: SendTemplateDto })
-  sendConfirmation(@Body() dto: SendTemplateDto) {
-    return this.templateService.sendConfirmation(dto);
-  }
-
-  @Post('reminder')
-  @ApiOperation({ summary: 'Send appointment reminder template' })
-  @ApiBody({ type: SendTemplateDto })
-  sendReminder(@Body() dto: SendTemplateDto) {
-    return this.templateService.sendReminder(dto);
-  }
-
-  @Post('cancellation')
-  @ApiOperation({ summary: 'Send appointment cancellation template' })
-  @ApiBody({ type: SendTemplateDto })
-  sendCancellation(@Body() dto: SendTemplateDto) {
-    return this.templateService.sendCancellation(dto);
-  }
-
-  @Post('webhook/delivery')
-  @ApiOperation({ summary: 'Simulate template delivery status webhook event' })
-  @ApiBody({ type: WebhookDeliveryEventDto })
-  handleDeliveryEvent(@Body() event: WebhookDeliveryEventDto) {
-    return this.templateService.handleDeliveryEvent(event);
-  }
-
-  @Get('status/:messageId')
-  @ApiOperation({ summary: 'Get template message delivery status' })
-  @ApiParam({ name: 'messageId', example: 'meta-tmpl-abc-123' })
-  getStatus(@Param('messageId') messageId: string) {
-    return this.templateService.getStatus(messageId);
-  }
-}
-```
-
-#### **4.3 Meta Signup Endpoints**
-```typescript
-// src/whatsapp/providers/meta/meta.controller.ts
-@ApiTags('meta')
-@Controller('meta')
-export class MetaController {
-  constructor(private readonly metaService: MetaService) {}
-
-  @Post('signup/start')
-  @ApiOperation({ summary: 'Start mock Meta Embedded Signup flow' })
-  @ApiBody({ type: StartSignupDto })
-  startSignup(@Body() body: StartSignupDto) {
-    return this.metaService.startSignup(body);
-  }
-
-  @Post('signup/callback')
-  @ApiOperation({ summary: 'Mock Meta signup callback' })
-  @ApiBody({ type: SignupCallbackDto })
-  signupCallback(@Body() body: SignupCallbackDto) {
-    return this.metaService.signupCallback(body);
-  }
-
-  @Get('webhook')
-  @ApiOperation({ summary: 'Mock Meta webhook verification' })
-  verifyWebhook(@Query() query: Record<string, string>) {
-    return this.metaService.verifyWebhook(query);
-  }
-
-  @Post('webhook')
-  @ApiOperation({ summary: 'Mock Meta webhook event' })
-  @ApiBody({ type: WebhookEventDto })
-  handleWebhook(@Body() payload: WebhookEventDto, @Headers('x-hub-signature-256') signature: string) {
-    return this.metaService.handleWebhook(payload, signature);
-  }
-}
-```
-
-### **Phase 5: Business Logic Implementation**
-
-#### **5.1 Template Service with Retry Logic**
-```typescript
-// src/template/template.service.ts
-@Injectable()
-export class TemplateService {
-  private readonly logger = new Logger(TemplateService.name);
-  private readonly MAX_RETRIES = 3;
-  private readonly RETRY_DELAY_MS = 100;
-
-  constructor(
-    private readonly providerFactory: WhatsAppProviderFactory,
-    @InjectRepository(TemplateMessage)
-    private readonly templateRepo: Repository<TemplateMessage>,
-  ) {}
-
-  async sendConfirmation(dto: SendTemplateDto) {
-    return this.sendWithRetry({ ...dto, templateName: TemplateType.CONFIRMATION });
-  }
-
-  private async sendWithRetry(dto: SendTemplateDto) {
-    const provider = this.providerFactory.getProvider();
-    let lastError: Error | null = null;
-    let retryCount = 0;
-
-    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
-      try {
-        const response = await provider.sendTemplateMessage(dto.templateName, dto);
-
-        // Save to database
-        const record = this.templateRepo.create({
-          messageId: response.messageId,
-          provider: response.provider,
-          templateName: dto.templateName,
-          patientName: dto.patientName,
-          doctorName: dto.doctorName,
-          hospitalName: dto.hospitalName,
-          appointmentDate: dto.appointmentDate,
-          appointmentTime: dto.appointmentTime,
-          phoneNumber: dto.phoneNumber,
-          status: TemplateStatus.SENT,
-          retryCount,
-        });
-        await this.templateRepo.save(record);
-
-        return response;
-      } catch (error) {
-        lastError = error;
-        retryCount++;
-
-        if (attempt < this.MAX_RETRIES) {
-          this.logger.warn(`Attempt ${attempt} failed, retrying in ${this.RETRY_DELAY_MS}ms`);
-          await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
-        }
-      }
-    }
-
-    // All retries failed - save failed record
-    const record = this.templateRepo.create({
-      messageId: `failed-${Date.now()}`,
-      provider: provider.constructor.name,
-      templateName: dto.templateName,
-      patientName: dto.patientName,
-      doctorName: dto.doctorName,
-      hospitalName: dto.hospitalName,
-      appointmentDate: dto.appointmentDate,
-      appointmentTime: dto.appointmentTime,
-      phoneNumber: dto.phoneNumber,
-      status: TemplateStatus.FAILED,
-      failureReason: lastError?.message,
-      retryCount,
-    });
-    await this.templateRepo.save(record);
-
-    throw lastError;
-  }
-
-  async handleDeliveryEvent(event: WebhookDeliveryEventDto) {
-    const record = await this.templateRepo.findOne({
-      where: { messageId: event.messageId },
-    });
-
-    if (!record) {
-      throw new NotFoundException(`No template message found for messageId: ${event.messageId}`);
-    }
-
-    record.status = event.status;
-    if (event.failureReason) {
-      record.failureReason = event.failureReason;
-    }
-
-    await this.templateRepo.save(record);
-    return { success: true, messageId: event.messageId, status: event.status };
-  }
-
-  async getStatus(messageId: string) {
-    const record = await this.templateRepo.findOne({ where: { messageId } });
-    if (!record) {
-      throw new NotFoundException(`No template message found for messageId: ${messageId}`);
-    }
-    return {
-      messageId: record.messageId,
-      templateName: record.templateName,
-      provider: record.provider,
-      status: record.status,
-      retryCount: record.retryCount,
-      failureReason: record.failureReason ?? null,
-      sentAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    };
-  }
-}
-```
-
-#### **5.2 Meta Service Implementation**
-```typescript
-// src/whatsapp/providers/meta/meta.service.ts
-@Injectable()
-export class MetaService {
-  private readonly logger = new Logger(MetaService.name);
-
-  constructor(
-    private readonly configService: ConfigService,
-    @InjectRepository(SignupState)
-    private readonly signupStateRepo: Repository<SignupState>,
-  ) {}
-
-  async startSignup(body?: { businessId?: string; businessName?: string; phoneNumber?: string }) {
-    const state = `mock-state-${crypto.randomUUID()}`;
-
-    const record = this.signupStateRepo.create({
-      state,
-      businessId: body?.businessId ?? 'mock-biz-001',
-      businessName: body?.businessName ?? 'Mock Business',
-      phoneNumber: body?.phoneNumber ?? 'mock-phone',
-      expiresAt: new Date(Date.now() + 600_000), // 10 minutes
-    });
-    await this.signupStateRepo.save(record);
-
-    return {
-      success: true,
-      signupUrl: `https://www.facebook.com/dialog/oauth?mock=true&state=${state}&business_id=${body?.businessId ?? 'mock-biz'}`,
-      state,
-      businessId: record.businessId,
-      businessName: record.businessName,
-      phoneNumber: record.phoneNumber,
-      expiresIn: 600,
-    };
-  }
-
-  signupCallback(body?: { fail?: boolean; errorCode?: string }) {
-    if (body?.fail === true) {
-      const errorCode = body.errorCode ?? 'ACCESS_DENIED';
-      throw new BadRequestException({
-        success: false,
-        errorCode,
-        message: 'Mock Meta signup failed',
-      });
-    }
-
-    return {
-      success: true,
-      businessId: `mock-biz-${crypto.randomUUID()}`,
-      phoneNumberId: `mock-ph-${crypto.randomUUID()}`,
-      accessToken: `EAAMock${crypto.randomBytes(12).toString('hex').toUpperCase()}`,
-      tokenType: 'bearer',
-      grantedScopes: ['whatsapp_business_messaging', 'whatsapp_business_management'],
-    };
-  }
-
-  verifyWebhook(query: Record<string, string>) {
-    const mode = query['hub.mode'];
-    const verifyToken = query['hub.verify_token'];
-    const challenge = query['hub.challenge'];
-
-    if (mode !== 'subscribe') {
-      throw new BadRequestException('hub.mode must be "subscribe"');
-    }
-
-    if (verifyToken !== 'mock_verify_token') {
-      throw new BadRequestException('Invalid verify token');
-    }
-
-    return { challenge };
-  }
-
-  async handleWebhook(payload: WebhookEventDto, signature: string) {
-    // Verify signature (mock implementation)
-    this.logger.log('Processing Meta webhook event');
-
-    // Process messages, statuses, etc.
-    return { success: true, processed: true };
-  }
-}
-```
-
-### **Phase 6: Testing Strategy**
-
-#### **6.1 Unit Tests**
-```typescript
-// src/template/template.service.spec.ts
-describe('TemplateService', () => {
-  let service: TemplateService;
-  let mockProvider: jest.Mocked<IWhatsAppProvider>;
-  let mockRepository: jest.Mocked<Repository<TemplateMessage>>;
-
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        TemplateService,
-        {
-          provide: WhatsAppProviderFactory,
-          useValue: { getProvider: jest.fn() },
-        },
-        {
-          provide: getRepositoryToken(TemplateMessage),
-          useValue: {
-            create: jest.fn(),
-            save: jest.fn(),
-            findOne: jest.fn(),
-          },
-        },
-      ],
-    }).compile();
-
-    service = module.get<TemplateService>(TemplateService);
-    mockProvider = { sendTemplateMessage: jest.fn() } as any;
-    mockRepository = module.get(getRepositoryToken(TemplateMessage));
-  });
-
-  it('should send confirmation template successfully', async () => {
-    const dto: SendTemplateDto = { /* test data */ };
-    const expectedResponse = { success: true, messageId: 'test-id' };
-
-    mockProvider.sendTemplateMessage.mockResolvedValue(expectedResponse);
-    jest.spyOn(service['providerFactory'], 'getProvider').mockReturnValue(mockProvider);
-
-    const result = await service.sendConfirmation(dto);
-    expect(result).toEqual(expectedResponse);
-  });
-});
-```
-
-#### **6.2 E2E Tests**
-```typescript
-// test/app.e2e-spec.ts
-describe('App (e2e)', () => {
-  let app: INestApplication;
-
-  beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    await app.init();
-  });
-
-  it('/templates/confirmation (POST)', () => {
-    return request(app.getHttpServer())
-      .post('/templates/confirmation')
-      .send({
-        templateName: 'appointment_confirmation',
-        patientName: 'Manju Kumari',
-        doctorName: 'Dr. Smith',
-        appointmentDate: '2026-05-15',
-        appointmentTime: '10:30 AM',
-        hospitalName: 'BMR Hospital',
-        phoneNumber: '919999999999',
-      })
-      .expect(201);
-  });
-});
-```
-
-### **Phase 7: Deployment & Production Setup**
-
-#### **7.1 Docker Configuration**
-```dockerfile
-# Dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "run", "start:prod"]
-```
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  app:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_USERNAME=postgres
-      - DB_PASSWORD=postgres
-      - DB_DATABASE=whatsapp_db
-    depends_on:
-      - db
-
-  db:
-    image: postgres:15
-    environment:
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=whatsapp_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-volumes:
-  postgres_data:
-```
-
-#### **7.2 Production Configuration**
-```typescript
-// src/app.module.ts (Production)
-TypeOrmModule.forRoot({
-  type: 'postgres',
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  username: process.env.DB_USERNAME,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_DATABASE,
-  autoLoadEntities: true,
-  synchronize: false, // ⚠️ Disabled in production
-  migrations: ['dist/migrations/*.js'], // Enable migrations
-  ssl: process.env.NODE_ENV === 'production', // Enable SSL in production
-}),
-```
-
-#### **7.3 Health Checks & Monitoring**
-```typescript
-// src/app.controller.ts
-@Controller()
-export class AppController {
-  @Get('health')
-  @ApiOperation({ summary: 'Health check endpoint' })
-  getHealth() {
-    return { status: 'ok', timestamp: new Date().toISOString() };
-  }
-}
-```
-
-### **Phase 8: Security & Best Practices**
-
-#### **8.1 Input Validation**
-- Use `class-validator` decorators on all DTOs
-- Implement global validation pipes
-- Sanitize user inputs
-
-#### **8.2 Error Handling**
-```typescript
-// src/common/filters/http-exception.filter.ts
-@Catch()
-export class HttpExceptionFilter implements ExceptionFilter {
-  catch(exception: HttpException, host: ArgumentsHost) {
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
-    const status = exception.getStatus();
-
-    response.status(status).json({
-      statusCode: status,
-      timestamp: new Date().toISOString(),
-      path: request.url,
-      message: exception.message,
-    });
-  }
-}
-```
-
-#### **8.3 Rate Limiting**
-```typescript
-// src/common/guards/rate-limit.guard.ts
-@Injectable()
-export class RateLimitGuard implements CanActivate {
-  // Implement rate limiting logic
-}
-```
-
-#### **8.4 Logging**
-```typescript
-// src/common/interceptors/logging.interceptor.ts
-@Injectable()
-export class LoggingInterceptor implements NestInterceptor {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const request = context.switchToHttp().getRequest();
-    const { method, url } = request;
-
-    this.logger.log(`Incoming request: ${method} ${url}`);
-
-    return next.handle().pipe(
-      tap(() => this.logger.log(`Request completed: ${method} ${url}`)),
-    );
-  }
-}
-```
-
-## 📋 **Implementation Checklist**
-
-### **✅ Completed Features**
-- [x] Project structure and architecture
-- [x] Database entities and relationships
-- [x] WhatsApp provider abstraction
-- [x] Template message management
-- [x] Meta Embedded Signup flow
-- [x] Webhook handling
-- [x] API documentation with Swagger
-- [x] Basic error handling
-- [x] Environment configuration
-
-### **🔄 In Progress / To Implement**
-- [ ] Comprehensive test coverage
-- [ ] Rate limiting
-- [ ] Advanced error handling
-- [ ] Monitoring and logging
-- [ ] Docker deployment
-- [ ] Database migrations
-- [ ] API versioning
-- [ ] Caching layer
-- [ ] Message queuing (Redis/RabbitMQ)
-
-### **📝 Future Enhancements**
-- [ ] Real Meta WhatsApp API integration
-- [ ] Message scheduling
-- [ ] Bulk messaging
-- [ ] Analytics dashboard
-- [ ] Multi-tenant support
-- [ ] API rate limiting per business
-- [ ] Message templates management UI
-
-## 🚀 **Quick Start Guide**
-
-```bash
-# 1. Clone and install
-git clone <repository>
-cd whatsapp-meta-mock
 npm install
-
-# 2. Setup environment
-cp .env.example .env
-# Edit .env with your database credentials
-
-# 3. Start PostgreSQL
-# Make sure PostgreSQL is running locally
-
-# 4. Run development server
-npm run start:dev
-
-# 5. Access APIs
-# Swagger: http://localhost:3000/api-docs
-# Health check: http://localhost:3000/health
 ```
 
-## 📚 **API Endpoints Summary**
-
-### **Appointment Management**
-- `POST /appointments` - Create appointment and send WhatsApp message
-
-### **WhatsApp Template Messages**
-- `POST /templates/confirmation` - Send appointment confirmation
-- `POST /templates/reminder` - Send appointment reminder
-- `POST /templates/cancellation` - Send appointment cancellation
-- `POST /templates/webhook/delivery` - Handle delivery status webhook
-- `GET /templates/status/:messageId` - Get message delivery status
-
-### **Meta Embedded Signup**
-- `POST /meta/signup/start` - Start signup flow
-- `POST /meta/signup/callback` - Handle signup callback
-- `GET /meta/webhook` - Webhook verification
-- `POST /meta/webhook` - Handle webhook events
-
-### **Documentation**
-- `GET /api-docs` - Swagger UI documentation
-- `GET /health` - Health check endpoint
-
-## 🔌 **Environment Variables**
+### Environment Configuration
+Create a `.env` file in the project root:
 
 ```env
-# Database Configuration
 DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=postgres
-DB_PASSWORD=postgres
-DB_DATABASE=whatsapp_db
-
-# Application Configuration
+DB_PASSWORD=your_password
+DB_DATABASE=whatsapp_meta_mock
 PORT=3000
-NODE_ENV=development
-
-# WhatsApp Provider Configuration
-WHATSAPP_PROVIDER=MESSAGE_BIRD  # or META_WHATSAPP
+WHATSAPP_PROVIDER=META_WHATSAPP
+WEBHOOK_VERIFY_TOKEN=mock_verify_token
+META_APP_SECRET=your_meta_app_secret
 ```
 
-## 🧪 **Testing**
-
+### Running the Application
 ```bash
-# Run unit tests
-npm run test
+# Development
+npm run start:dev
 
-# Run e2e tests
-npm run test:e2e
-
-# Run test coverage
-npm run test:cov
-
-# Run tests in watch mode
-npm run test:watch
-```
-
-## 📦 **Build & Deployment**
-
-```bash
-# Build for production
+# Production
 npm run build
-
-# Start production server
 npm run start:prod
-
-# Docker deployment
-docker-compose up -d
 ```
 
-## 🤝 **Contributing**
+The API will be available at `http://localhost:3000`.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new features
-5. Ensure all tests pass
-6. Submit a pull request
+## Environment Variables
 
-## 📄 **License**
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DB_HOST` | Yes | — | PostgreSQL host |
+| `DB_PORT` | Yes | — | PostgreSQL port |
+| `DB_USERNAME` | Yes | — | Database username |
+| `DB_PASSWORD` | Yes | — | Database password |
+| `DB_DATABASE` | Yes | — | Database name |
+| `PORT` | No | `3000` | HTTP server port |
+| `WHATSAPP_PROVIDER` | No | `MESSAGE_BIRD` | Primary provider (`META_WHATSAPP` or `MESSAGE_BIRD`) |
+| `WEBHOOK_VERIFY_TOKEN` | Yes for webhook verification | — | Token for Meta webhook verification |
+| `META_APP_SECRET` | No | — | HMAC secret for webhook signature validation |
 
-This project is licensed under the UNLICENSED License.
+## API Reference
 
----
+### Appointments
 
-This comprehensive implementation plan covers all aspects of building a robust, scalable WhatsApp Meta Mock Integration API with proper architecture, testing, and deployment strategies.
+#### Create Appointment
+`POST /appointments`
+
+Creates an appointment and sends a WhatsApp confirmation template.
+
+**Request Body:**
+```json
+{
+  "patientName": "Manju Kumari",
+  "phoneNumber": "919999999999",
+  "appointmentDate": "2026-05-15",
+  "doctorName": "Dr. Jatin Das",
+  "appointmentTime": "10:30 AM",
+  "hospitalName": "BMR Hospital"
+}
+```
+
+**Success Response (201):**
+```json
+{
+  "success": true,
+  "appointment": {
+    "patientName": "Manju Kumari",
+    "phoneNumber": "919999999999",
+    "appointmentDate": "2026-05-15",
+    "doctorName": "Dr. Jatin Das",
+    "appointmentTime": "10:30 AM",
+    "hospitalName": "BMR Hospital"
+  },
+  "whatsappResponse": {
+    "success": true,
+    "provider": "META_WHATSAPP",
+    "messageId": "meta-tmpl-abc-123",
+    "status": "SENT",
+    "sentAt": "2026-05-13T08:30:00.000Z"
+  }
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "statusCode": 400,
+  "message": ["phoneNumber must be 10-15 digits, no spaces or symbols"],
+  "error": "Bad Request"
+}
+```
+
+### Templates
+
+#### Send Confirmation Template
+`POST /templates/confirmation`
+
+#### Send Reminder Template
+`POST /templates/reminder`
+
+#### Send Cancellation Template
+`POST /templates/cancellation`
+
+All template endpoints accept the same request body:
+
+**Request Body:**
+```json
+{
+  "templateName": "appointment_confirmation",
+  "patientName": "Manju Kumari",
+  "doctorName": "Dr. Jatin Das",
+  "appointmentDate": "2026-05-15",
+  "appointmentTime": "10:30 AM",
+  "hospitalName": "BMR Hospital",
+  "phoneNumber": "919999999999"
+}
+```
+
+**Success Response (201):**
+```json
+{
+  "success": true,
+  "provider": "META_WHATSAPP",
+  "messageId": "meta-tmpl-abc-123",
+  "to": "919999999999",
+  "templateName": "appointment_confirmation",
+  "status": "SENT",
+  "sentAt": "2026-05-13T08:30:00.000Z",
+  "retryCount": 0,
+  "fallbackUsed": false
+}
+```
+
+### Delivery Status
+
+#### Simulate Delivery Webhook Event
+`POST /templates/webhook/delivery`
+
+**Request Body:**
+```json
+{
+  "messageId": "meta-tmpl-abc-123",
+  "status": "DELIVERED",
+  "failureReason": null
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "messageId": "meta-tmpl-abc-123",
+  "status": "DELIVERED",
+  "updatedAt": "2026-05-13T08:35:00.000Z"
+}
+```
+
+#### Get Template Status
+`GET /templates/status/:messageId`
+
+Returns the delivery status for a message ID.
+
+**Response (200):**
+```json
+{
+  "messageId": "meta-tmpl-abc-123",
+  "templateName": "appointment_confirmation",
+  "provider": "META_WHATSAPP",
+  "status": "DELIVERED",
+  "retryCount": 0,
+  "failureReason": null,
+  "sentAt": "2026-05-13T08:30:00.000Z",
+  "updatedAt": "2026-05-13T08:35:00.000Z"
+}
+```
+
+### Meta Integration
+
+#### Start Mock Signup
+`POST /meta/signup/start`
+
+**Request Body:**
+```json
+{
+  "businessId": "mock-business-123",
+  "businessName": "Test Clinic",
+  "phoneNumber": "919999999999"
+}
+```
+
+#### Mock Signup Callback
+`POST /meta/signup/callback`
+
+**Request Body (Success):**
+```json
+{}
+```
+
+**Request Body (Failure):**
+```json
+{
+  "fail": true,
+  "errorCode": "ACCESS_DENIED"
+}
+```
+
+#### Verify Webhook
+`GET /meta/webhook`
+
+Query parameters:
+- `hub.mode=subscribe`
+- `hub.verify_token=<WEBHOOK_VERIFY_TOKEN>`
+- `hub.challenge=<challenge>`
+
+Returns the challenge string on success.
+
+#### Receive Webhook Event
+`POST /meta/webhook`
+
+If `META_APP_SECRET` is set, validates `X-Hub-Signature-256`.
+
+## Webhook Verification Flow
+
+1. Meta sends `GET /meta/webhook` with verification parameters.
+2. Service validates `hub.mode=subscribe` and `hub.verify_token` matches `WEBHOOK_VERIFY_TOKEN`.
+3. Returns `hub.challenge` to complete verification.
+
+For event delivery:
+1. Meta sends `POST /meta/webhook` with event payload.
+2. If `META_APP_SECRET` configured, computes HMAC-SHA256 of raw body and compares to `X-Hub-Signature-256`.
+3. Processes the webhook event if signature valid.
+
+## Provider Fallback Flow
+
+Provider selection is based on `WHATSAPP_PROVIDER`:
+- `META_WHATSAPP`: Meta primary, MessageBird fallback
+- `MESSAGE_BIRD`: MessageBird primary, Meta fallback
+
+Fallback behavior:
+1. Attempt primary provider up to 3 times.
+2. If primary fails, switch to secondary provider.
+3. Attempt secondary provider up to 3 times.
+4. Return success if either provider succeeds, with `fallbackUsed: true` if secondary used.
+5. Return failure if both providers fail.
+
+## Retry Behavior
+
+- Each provider is retried up to 3 times.
+- Retry delay: `100ms * attempt` (100ms, 200ms, 300ms).
+- Exponential backoff applied between attempts.
+- Failures are logged with attempt details.
+
+## Testing Instructions
+
+Run the full test suite:
+```bash
+npm test
+```
+
+Run specific test file:
+```bash
+npm test -- --testPathPatterns="appointment.service.spec.ts" --runInBand
+```
+
+## Curl Examples
+
+Create appointment:
+```bash
+curl -X POST http://localhost:3000/appointments \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "patientName": "Manju Kumari",
+    "phoneNumber": "919999999999",
+    "appointmentDate": "2026-05-15",
+    "doctorName": "Dr. Jatin Das",
+    "appointmentTime": "10:30 AM",
+    "hospitalName": "BMR Hospital"
+  }'
+```
+
+Send confirmation template:
+```bash
+curl -X POST http://localhost:3000/templates/confirmation \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "templateName": "appointment_confirmation",
+    "patientName": "Manju Kumari",
+    "doctorName": "Dr. Jatin Das",
+    "appointmentDate": "2026-05-15",
+    "appointmentTime": "10:30 AM",
+    "hospitalName": "BMR Hospital",
+    "phoneNumber": "919999999999"
+  }'
+```
+
+Verify webhook:
+```bash
+curl 'http://localhost:3000/meta/webhook?hub.mode=subscribe&hub.verify_token=mock_verify_token&hub.challenge=challenge-123'
+```
+
+Post webhook event:
+```bash
+curl -X POST http://localhost:3000/meta/webhook \
+  -H 'Content-Type: application/json' \
+  -H 'X-Hub-Signature-256: sha256=<signature>' \
+  -d '{ "object": "whatsapp_business_account", "entry": [] }'
+```

@@ -26,6 +26,7 @@ const mockMetaTemplateResponse = {
   templateName: 'appointment_confirmation',
   status: 'SENT',
   sentAt: '2026-05-15T10:00:00.000Z',
+  providerPayload: {},
 };
 
 const mockTemplateRepo = {
@@ -34,20 +35,30 @@ const mockTemplateRepo = {
   findOne: jest.fn(),
 };
 
-const mockProviderFactory = {
-  getProvider: jest.fn(),
-};
+function createMockProviderFactory(
+  primarySend: jest.Mock,
+  secondarySend: jest.Mock,
+) {
+  return {
+    getProvider: jest.fn(),
+    getProvidersWithFailover: jest.fn().mockReturnValue([
+      { sendTemplateMessage: primarySend, name: 'META_WHATSAPP' },
+      { sendTemplateMessage: secondarySend, name: 'MESSAGE_BIRD' },
+    ]),
+  };
+}
 
 describe('TemplateService', () => {
   let service: TemplateService;
+  let mockProviderFactory: ReturnType<typeof createMockProviderFactory>;
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockProviderFactory.getProvider.mockReturnValue({
-      sendTemplateMessage: jest
-        .fn()
-        .mockResolvedValue(mockMetaTemplateResponse),
-    });
+
+    mockProviderFactory = createMockProviderFactory(
+      jest.fn().mockResolvedValue(mockMetaTemplateResponse),
+      jest.fn().mockResolvedValue(mockMetaTemplateResponse),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -75,6 +86,9 @@ describe('TemplateService', () => {
       });
       expect(result.success).toBe(true);
       expect(result.status).toBe('SENT');
+      if (!result.success) {
+        throw new Error('Expected template send to succeed');
+      }
       expect(result.messageId).toBeDefined();
     });
 
@@ -111,42 +125,87 @@ describe('TemplateService', () => {
 
   describe('retry logic', () => {
     it('should retry up to 3 times on failure and return FAILED status', async () => {
-      const mockSend = jest
+      const primarySend = jest
         .fn()
         .mockRejectedValue(new Error('Network timeout'));
-      mockProviderFactory.getProvider.mockReturnValue({
-        sendTemplateMessage: mockSend,
-      });
+      const secondarySend = jest
+        .fn()
+        .mockRejectedValue(new Error('Network timeout'));
+
+      mockProviderFactory.getProvidersWithFailover.mockReturnValue([
+        { sendTemplateMessage: primarySend, name: 'META_WHATSAPP' },
+        { sendTemplateMessage: secondarySend, name: 'MESSAGE_BIRD' },
+      ]);
 
       const result = await service.sendConfirmation({
         ...mockTemplatePayload,
         templateName: TemplateType.CONFIRMATION,
       });
 
-      expect(mockSend).toHaveBeenCalledTimes(3);
+      expect(primarySend).toHaveBeenCalledTimes(3);
+      expect(secondarySend).toHaveBeenCalledTimes(3);
       expect(result.success).toBe(false);
       expect(result.status).toBe(TemplateStatus.FAILED);
-      expect(result.failureReason).toBe('Network timeout');
+      if (result.success) {
+        throw new Error('Expected template send to fail');
+      }
+      expect(result.failureReason).toContain('Network timeout');
     });
 
     it('should succeed on second attempt if first fails', async () => {
-      const mockSend = jest
+      const primarySend = jest
         .fn()
         .mockRejectedValueOnce(new Error('Temporary failure'))
         .mockResolvedValueOnce(mockMetaTemplateResponse);
+      const secondarySend = jest.fn().mockResolvedValue(mockMetaTemplateResponse);
 
-      mockProviderFactory.getProvider.mockReturnValue({
-        sendTemplateMessage: mockSend,
-      });
+      mockProviderFactory.getProvidersWithFailover.mockReturnValue([
+        { sendTemplateMessage: primarySend, name: 'META_WHATSAPP' },
+        { sendTemplateMessage: secondarySend, name: 'MESSAGE_BIRD' },
+      ]);
 
       const result = await service.sendConfirmation({
         ...mockTemplatePayload,
         templateName: TemplateType.CONFIRMATION,
       });
 
-      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(primarySend).toHaveBeenCalledTimes(2);
+      expect(secondarySend).toHaveBeenCalledTimes(0);
       expect(result.success).toBe(true);
+      if (!result.success) {
+        throw new Error('Expected template send to succeed');
+      }
       expect(result.retryCount).toBe(1);
+    });
+
+    it('should fallback to secondary provider when primary fails completely', async () => {
+      const primarySend = jest
+        .fn()
+        .mockRejectedValue(new Error('Primary down'));
+      const secondarySend = jest.fn().mockResolvedValue({
+        ...mockMetaTemplateResponse,
+        provider: 'MESSAGE_BIRD',
+        messageId: 'mb-tmpl-fallback-001',
+      });
+
+      mockProviderFactory.getProvidersWithFailover.mockReturnValue([
+        { sendTemplateMessage: primarySend, name: 'META_WHATSAPP' },
+        { sendTemplateMessage: secondarySend, name: 'MESSAGE_BIRD' },
+      ]);
+
+      const result = await service.sendConfirmation({
+        ...mockTemplatePayload,
+        templateName: TemplateType.CONFIRMATION,
+      });
+
+      expect(primarySend).toHaveBeenCalledTimes(3);
+      expect(secondarySend).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        throw new Error('Expected template send to succeed');
+      }
+      expect(result.fallbackUsed).toBe(true);
+      expect(result.provider).toBe('MESSAGE_BIRD');
     });
   });
 

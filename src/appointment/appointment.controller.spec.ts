@@ -13,14 +13,17 @@ describe('AppointmentController', () => {
         patientName: 'Manju Kumari',
         phoneNumber: '919999999999',
         appointmentDate: '2026-05-15',
+        doctorName: 'Dr. Jatin Das',
+        appointmentTime: '10:30 AM',
+        hospitalName: 'BMR Hospital',
       },
       whatsappResponse: {
         success: true,
         provider: 'META_WHATSAPP',
         messageId: 'meta-wamid-test-001',
-        to: '919999999999',
-        body: 'Hello Manju Kumari, your appointment is confirmed for 2026-05-15.',
+        status: 'SENT',
         sentAt: '2026-05-15T10:00:00.000Z',
+        providerPayload: {},
       },
     }),
   };
@@ -46,6 +49,9 @@ describe('AppointmentController', () => {
       patientName: 'Manju Kumari',
       phoneNumber: '919999999999',
       appointmentDate: '2026-05-15',
+      doctorName: 'Dr. Jatin Das',
+      appointmentTime: '10:30 AM',
+      hospitalName: 'BMR Hospital',
     };
 
     const result = await controller.create(payload);

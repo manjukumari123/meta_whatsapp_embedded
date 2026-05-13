@@ -2,12 +2,26 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WhatsAppProviderFactory } from 'src/whatsapp/factory/whatsapp-provider.factory';
+import { ITemplateMessageResponse } from 'src/whatsapp/providers/interfaces/whatsapp-provider.interface';
 import { SendTemplateDto, TemplateType } from './dto/send-template.dto';
 import { WebhookDeliveryEventDto } from './dto/webhook-delivery-event.dto';
 import {
   TemplateMessage,
   TemplateStatus,
 } from './entities/template-message.entity';
+
+type TemplateSendSuccess = ITemplateMessageResponse & {
+  retryCount: number;
+  fallbackUsed: boolean;
+};
+
+type TemplateSendFailure = {
+  success: false;
+  status: TemplateStatus;
+  failureReason?: string;
+  retryCount: number;
+  fallbackUsed: boolean;
+};
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 100;
@@ -92,15 +106,57 @@ export class TemplateService {
     };
   }
 
-  private async sendWithRetry(dto: SendTemplateDto) {
-    const provider = this.providerFactory.getProvider();
+  private async sendWithRetry(
+    dto: SendTemplateDto,
+  ): Promise<TemplateSendSuccess | TemplateSendFailure> {
+    const [primary, secondary] =
+      this.providerFactory.getProvidersWithFailover();
+
+    // Try primary provider first
+    const primaryResult = await this.attemptSend(dto, primary, false);
+    if (primaryResult.success) {
+      return primaryResult;
+    }
+
+    // Fallback to secondary provider
+    this.logger.warn(
+      `Primary provider ${primary.name} failed after ${MAX_RETRIES} attempts. Falling back to ${secondary.name}...`,
+    );
+
+    const fallbackResult = await this.attemptSend(dto, secondary, true);
+    if (fallbackResult.success) {
+      this.logger.log(
+        `Fallback provider ${secondary.name} succeeded | messageId: ${fallbackResult.messageId}`,
+      );
+      return fallbackResult;
+    }
+
+    // Both providers failed
+    this.logger.error(
+      `All providers failed. Primary: ${primary.name}, Fallback: ${secondary.name}`,
+    );
+
+    return {
+      success: false,
+      status: TemplateStatus.FAILED,
+      failureReason: `Primary (${primary.name}): ${primaryResult.failureReason}; Fallback (${secondary.name}): ${fallbackResult.failureReason}`,
+      retryCount: primaryResult.retryCount + fallbackResult.retryCount,
+      fallbackUsed: true,
+    };
+  }
+
+  private async attemptSend(
+    dto: SendTemplateDto,
+    provider: any,
+    isFallback: boolean,
+  ): Promise<TemplateSendSuccess | TemplateSendFailure> {
     let lastError: Error | null = null;
     let retryCount = 0;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         this.logger.log(
-          `Attempt ${attempt} | template: ${dto.templateName} | to: ${dto.phoneNumber}`,
+          `${isFallback ? '[FALLBACK]' : '[PRIMARY]'} Attempt ${attempt} | provider: ${provider.name} | template: ${dto.templateName} | to: ${dto.phoneNumber}`,
         );
 
         const response = await provider.sendTemplateMessage(dto.templateName, {
@@ -128,15 +184,15 @@ export class TemplateService {
 
         await this.templateRepo.save(record);
         this.logger.log(
-          `Template sent successfully | messageId: ${response.messageId}`,
+          `Template sent successfully | provider: ${provider.name} | messageId: ${response.messageId}`,
         );
 
-        return { ...response, retryCount };
+        return { ...response, retryCount, fallbackUsed: isFallback };
       } catch (error) {
         lastError = error as Error;
         retryCount = attempt;
         this.logger.warn(
-          `Attempt ${attempt} failed | reason: ${lastError.message}`,
+          `Attempt ${attempt} failed on ${provider.name} | reason: ${lastError.message}`,
         );
 
         if (attempt < MAX_RETRIES) {
@@ -147,10 +203,10 @@ export class TemplateService {
       }
     }
 
-    // All retries exhausted — save FAILED record
+    // All retries exhausted for this provider — save FAILED record
     const failedRecord = this.templateRepo.create({
-      messageId: `failed-${Date.now()}`,
-      provider: 'UNKNOWN',
+      messageId: `failed-${provider.name.toLowerCase()}-${Date.now()}`,
+      provider: provider.name,
       templateName: dto.templateName,
       patientName: dto.patientName,
       doctorName: dto.doctorName,
@@ -165,7 +221,7 @@ export class TemplateService {
 
     await this.templateRepo.save(failedRecord);
     this.logger.error(
-      `All ${MAX_RETRIES} attempts failed | reason: ${lastError?.message}`,
+      `All ${MAX_RETRIES} attempts failed on ${provider.name} | reason: ${lastError?.message}`,
     );
 
     return {
@@ -173,6 +229,7 @@ export class TemplateService {
       status: TemplateStatus.FAILED,
       failureReason: lastError?.message,
       retryCount,
+      fallbackUsed: isFallback,
     };
   }
 }

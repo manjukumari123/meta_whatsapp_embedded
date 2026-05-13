@@ -115,23 +115,40 @@ export class MetaService {
 
   handleWebhook(
     payload: WebhookEventDto,
-    signature?: string,
+    signature?: string | string[],
     rawBody?: Buffer | string,
   ) {
-    // ✅ Fix 4: HMAC signature verification using the exact raw request body
     const appSecret = this.configService.get<string>('META_APP_SECRET');
-    if (appSecret && signature) {
+    const receivedSignature = Array.isArray(signature)
+      ? signature[0]
+      : signature;
+
+    if (appSecret) {
+      if (!receivedSignature) {
+        this.logger.error(
+          'Webhook signature verification failed: missing signature header',
+        );
+        throw new BadRequestException('Missing webhook signature');
+      }
+
+      if (!rawBody) {
+        this.logger.error(
+          'Webhook signature verification failed: raw request body unavailable',
+        );
+        throw new BadRequestException(
+          'Raw webhook body required for signature verification',
+        );
+      }
+
       const bodyToVerify =
-        typeof rawBody === 'string'
-          ? rawBody
-          : rawBody?.toString('utf8') ?? JSON.stringify(payload);
+        typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
 
       const expected = `sha256=${crypto
         .createHmac('sha256', appSecret)
         .update(bodyToVerify)
         .digest('hex')}`;
 
-      if (signature !== expected) {
+      if (receivedSignature.trim() !== expected) {
         this.logger.error(
           'Webhook signature mismatch — possible spoofed request',
         );

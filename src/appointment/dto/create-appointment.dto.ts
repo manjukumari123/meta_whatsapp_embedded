@@ -22,4 +22,19 @@ export class CreateAppointmentDto {
     message: 'appointmentDate must be in YYYY-MM-DD format',
   })
   appointmentDate: string;
+
+  @ApiProperty({ example: 'Dr. Jatin Das' })
+  @IsString()
+  @IsNotEmpty()
+  doctorName: string;
+
+  @ApiProperty({ example: '10:30 AM' })
+  @IsString()
+  @IsNotEmpty()
+  appointmentTime: string;
+
+  @ApiProperty({ example: 'BMR Hospital' })
+  @IsString()
+  @IsNotEmpty()
+  hospitalName: string;
 }

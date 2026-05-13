@@ -1,30 +1,45 @@
 import { Injectable } from '@nestjs/common';
-
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
-
 import { AppointmentResponseDto } from './dto/appointment-response.dto';
-
-import { WhatsAppProviderFactory } from 'src/whatsapp/factory/whatsapp-provider.factory';
-
-import { IWhatsAppProvider } from 'src/whatsapp/providers/interfaces/whatsapp-provider.interface';
+import { TemplateService } from 'src/template/template.service';
+import { TemplateType } from 'src/template/dto/send-template.dto';
 
 @Injectable()
 export class AppointmentService {
-  constructor(private readonly providerFactory: WhatsAppProviderFactory) {}
+  constructor(private readonly templateService: TemplateService) {}
 
   async createAppointment(
     payload: CreateAppointmentDto,
   ): Promise<AppointmentResponseDto> {
-    const provider: IWhatsAppProvider = this.providerFactory.getProvider();
+    const whatsappResponse = await this.templateService.sendConfirmation({
+      templateName: TemplateType.CONFIRMATION,
+      patientName: payload.patientName,
+      doctorName: 'Dr. Default',
+      appointmentDate: payload.appointmentDate,
+      appointmentTime: '10:00 AM',
+      hospitalName: 'Default Clinic',
+      phoneNumber: payload.phoneNumber,
+    });
 
-    const whatsappResponse: Awaited<
-      ReturnType<IWhatsAppProvider['sendAppointmentMessage']>
-    > = await provider.sendAppointmentMessage(payload);
+    if (!whatsappResponse.success) {
+      throw new Error(
+        whatsappResponse.failureReason ?? 'Failed to send appointment template',
+      );
+    }
+
+    const successResponse = whatsappResponse as any;
 
     return {
       success: true,
       appointment: payload,
-      whatsappResponse,
+      whatsappResponse: {
+        success: successResponse.success,
+        provider: successResponse.provider,
+        messageId: successResponse.messageId,
+        status: successResponse.status,
+        sentAt: successResponse.sentAt,
+        providerPayload: successResponse.providerPayload,
+      },
     };
   }
 }

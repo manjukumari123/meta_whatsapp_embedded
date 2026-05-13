@@ -9,5 +9,8 @@ export class AppointmentResponseDto {
     success: boolean;
     provider: string;
     messageId: string;
+    status: string;
+    sentAt: string;
+    providerPayload?: object;
   };
 }

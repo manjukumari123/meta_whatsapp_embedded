@@ -4,10 +4,10 @@ import { AppointmentController } from './appointment.controller';
 
 import { AppointmentService } from './appointment.service';
 
-import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
+import { TemplateModule } from 'src/template/template.module';
 
 @Module({
-  imports: [WhatsappModule],
+  imports: [TemplateModule],
 
   controllers: [AppointmentController],
 

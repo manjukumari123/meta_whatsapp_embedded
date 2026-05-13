@@ -1,23 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CreateAppointmentDto } from 'src/appointment/dto/create-appointment.dto';
 import {
+  IAppointmentMessageResponse,
   ITemplateMessageResponse,
   ITemplatePayload,
   IWhatsAppProvider,
+  TemplateName,
 } from '../interfaces/whatsapp-provider.interface';
 
 @Injectable()
 export class MessageBirdProvider implements IWhatsAppProvider {
+  readonly name = 'MESSAGE_BIRD';
   private readonly logger = new Logger(MessageBirdProvider.name);
 
-  async sendAppointmentMessage(payload: CreateAppointmentDto): Promise<{
-    success: boolean;
-    provider: string;
-    messageId: string;
-    to: string;
-    body: string;
-    sentAt: string;
-  }> {
+  async sendAppointmentMessage(
+    payload: ITemplatePayload,
+  ): Promise<IAppointmentMessageResponse> {
     const { patientName, phoneNumber, appointmentDate } = payload;
 
     if (!phoneNumber || phoneNumber.length < 10) {
@@ -28,6 +25,17 @@ export class MessageBirdProvider implements IWhatsAppProvider {
     const messageBody = `Hi ${patientName}, your appointment on ${appointmentDate} has been booked. Contact us to reschedule.`;
     const messageId = `mb-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
+    // Realistic MessageBird Conversations API payload structure
+    const providerPayload = {
+      to: phoneNumber,
+      type: 'text',
+      content: {
+        text: messageBody,
+      },
+      from: 'your-channel-id',
+      reportUrl: 'https://your-callback-url.com/delivery',
+    };
+
     this.logger.log(
       `MessageBird: Sending message to ${phoneNumber} | messageId: ${messageId}`,
     );
@@ -35,19 +43,17 @@ export class MessageBirdProvider implements IWhatsAppProvider {
 
     return {
       success: true,
-      provider: 'MESSAGE_BIRD',
+      provider: this.name,
       messageId,
       to: phoneNumber,
       body: messageBody,
       sentAt: new Date().toISOString(),
+      providerPayload,
     };
   }
 
   async sendTemplateMessage(
-    templateName:
-      | 'appointment_confirmation'
-      | 'appointment_reminder'
-      | 'appointment_cancellation',
+    templateName: TemplateName,
     payload: ITemplatePayload,
   ): Promise<ITemplateMessageResponse> {
     const {
@@ -72,6 +78,31 @@ export class MessageBirdProvider implements IWhatsAppProvider {
       appointment_cancellation: `Hi ${patientName}, your appointment with ${doctorName} at ${hospitalName} on ${appointmentDate} at ${appointmentTime} has been cancelled.`,
     };
 
+    // Realistic MessageBird HSM (template) payload structure
+    const providerPayload = {
+      to: phoneNumber,
+      type: 'hsm',
+      content: {
+        hsm: {
+          namespace: 'your-namespace-id',
+          templateName: templateName,
+          language: {
+            policy: 'deterministic',
+            code: 'en',
+          },
+          params: [
+            { default: patientName },
+            { default: doctorName },
+            { default: hospitalName },
+            { default: appointmentDate },
+            { default: appointmentTime },
+          ],
+        },
+      },
+      from: 'your-channel-id',
+      reportUrl: 'https://your-callback-url.com/delivery',
+    };
+
     this.logger.log(
       `MessageBird: Sending template "${templateName}" to ${phoneNumber} | messageId: ${messageId}`,
     );
@@ -79,12 +110,13 @@ export class MessageBirdProvider implements IWhatsAppProvider {
 
     return {
       success: true,
-      provider: 'MESSAGE_BIRD',
+      provider: this.name,
       messageId,
       to: phoneNumber,
       templateName,
       status: 'SENT',
       sentAt: new Date().toISOString(),
+      providerPayload,
     };
   }
 }

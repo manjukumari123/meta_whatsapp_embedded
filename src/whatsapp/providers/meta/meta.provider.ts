@@ -1,24 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { CreateAppointmentDto } from 'src/appointment/dto/create-appointment.dto';
 import {
+  IAppointmentMessageResponse,
   ITemplateMessageResponse,
   ITemplatePayload,
   IWhatsAppProvider,
+  TemplateName,
 } from '../interfaces/whatsapp-provider.interface';
 
 @Injectable()
 export class MetaProvider implements IWhatsAppProvider {
+  readonly name = 'META_WHATSAPP';
   private readonly logger = new Logger(MetaProvider.name);
 
-  async sendAppointmentMessage(payload: CreateAppointmentDto): Promise<{
-    success: boolean;
-    provider: string;
-    messageId: string;
-    to: string;
-    body: string;
-    sentAt: string;
-  }> {
+  async sendAppointmentMessage(
+    payload: ITemplatePayload,
+  ): Promise<IAppointmentMessageResponse> {
     const { patientName, phoneNumber, appointmentDate } = payload;
 
     if (!phoneNumber || phoneNumber.length < 10) {
@@ -27,7 +24,19 @@ export class MetaProvider implements IWhatsAppProvider {
     }
 
     const messageId = `meta-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-    const body = `Hello ${patientName}, your appointment is confirmed for ${appointmentDate}.`;
+    const bodyText = `Hello ${patientName}, your appointment is confirmed for ${appointmentDate}.`;
+
+    // Realistic Meta Cloud API message payload structure
+    const providerPayload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phoneNumber,
+      type: 'text',
+      text: {
+        preview_url: false,
+        body: bodyText,
+      },
+    };
 
     this.logger.log(
       `Meta: Sending message to ${phoneNumber} | messageId: ${messageId}`,
@@ -36,19 +45,17 @@ export class MetaProvider implements IWhatsAppProvider {
 
     return {
       success: true,
-      provider: 'META_WHATSAPP',
+      provider: this.name,
       messageId,
       to: phoneNumber,
-      body,
+      body: bodyText,
       sentAt: new Date().toISOString(),
+      providerPayload,
     };
   }
 
   async sendTemplateMessage(
-    templateName:
-      | 'appointment_confirmation'
-      | 'appointment_reminder'
-      | 'appointment_cancellation',
+    templateName: TemplateName,
     payload: ITemplatePayload,
   ): Promise<ITemplateMessageResponse> {
     const {
@@ -73,6 +80,33 @@ export class MetaProvider implements IWhatsAppProvider {
       appointment_cancellation: `Dear ${patientName}, your appointment with ${doctorName} at ${hospitalName} on ${appointmentDate} at ${appointmentTime} has been cancelled.`,
     };
 
+    // Realistic Meta Cloud API template message payload structure
+    const providerPayload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phoneNumber,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: {
+          code: 'en_US',
+          policy: 'deterministic',
+        },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: patientName },
+              { type: 'text', text: doctorName },
+              { type: 'text', text: hospitalName },
+              { type: 'text', text: appointmentDate },
+              { type: 'text', text: appointmentTime },
+            ],
+          },
+        ],
+      },
+    };
+
     this.logger.log(
       `Meta: Sending template "${templateName}" to ${phoneNumber} | messageId: ${messageId}`,
     );
@@ -80,12 +114,13 @@ export class MetaProvider implements IWhatsAppProvider {
 
     return {
       success: true,
-      provider: 'META_WHATSAPP',
+      provider: this.name,
       messageId,
       to: phoneNumber,
       templateName,
       status: 'SENT',
       sentAt: new Date().toISOString(),
+      providerPayload,
     };
   }
 }

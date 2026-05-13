@@ -11,7 +11,7 @@ const mockSignupStateRepo = {
 };
 
 const mockConfigService = {
-  get: jest.fn((key: string) => {
+  get: jest.fn((key: string): string | null => {
     if (key === 'WEBHOOK_VERIFY_TOKEN') return 'mock_verify_token';
     if (key === 'META_APP_SECRET') return null;
     return null;
@@ -196,6 +196,30 @@ describe('MetaService', () => {
       };
       const result = service.handleWebhook(multi as any);
       expect(result.processed).toBe(2);
+    });
+
+    it('should verify the webhook signature using raw body buffer', () => {
+      const secret = 'test_secret';
+      mockConfigService.get.mockImplementation((key: string) => {
+        if (key === 'WEBHOOK_VERIFY_TOKEN') return 'mock_verify_token';
+        if (key === 'META_APP_SECRET') return secret;
+        return null;
+      });
+
+      const rawBody = Buffer.from(JSON.stringify(validWebhookPayload), 'utf8');
+      const expectedSignature = `sha256=${require('crypto')
+        .createHmac('sha256', secret)
+        .update(rawBody)
+        .digest('hex')}`;
+
+      const result = service.handleWebhook(
+        validWebhookPayload as any,
+        expectedSignature,
+        rawBody,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.processed).toBe(1);
     });
   });
 });

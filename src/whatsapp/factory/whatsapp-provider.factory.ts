@@ -1,22 +1,15 @@
 import { Injectable } from '@nestjs/common';
-
 import { ConfigService } from '@nestjs/config';
-
 import { WhatsAppProvider } from '../enums/whatsapp-provider.enum';
-
 import { IWhatsAppProvider } from '../providers/interfaces/whatsapp-provider.interface';
-
 import { MessageBirdProvider } from '../providers/messagebird/messagebird.provider';
-
 import { MetaProvider } from '../providers/meta/meta.provider';
 
 @Injectable()
 export class WhatsAppProviderFactory {
   constructor(
     private readonly configService: ConfigService,
-
     private readonly messageBirdProvider: MessageBirdProvider,
-
     private readonly metaProvider: MetaProvider,
   ) {}
 
@@ -33,5 +26,22 @@ export class WhatsAppProviderFactory {
       default:
         return this.messageBirdProvider;
     }
+  }
+
+  /**
+   * Returns providers in failover order: [primary, secondary]
+   * The secondary is the provider NOT configured as primary.
+   */
+  getProvidersWithFailover(): [IWhatsAppProvider, IWhatsAppProvider] {
+    const configured =
+      (this.configService.get<string>(
+        'WHATSAPP_PROVIDER',
+      ) as WhatsAppProvider) ?? WhatsAppProvider.MESSAGE_BIRD;
+
+    if (configured === WhatsAppProvider.META_WHATSAPP) {
+      return [this.metaProvider, this.messageBirdProvider];
+    }
+
+    return [this.messageBirdProvider, this.metaProvider];
   }
 }

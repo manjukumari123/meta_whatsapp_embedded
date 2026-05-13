@@ -9,5 +9,6 @@ import { TemplateMessage } from './entities/template-message.entity';
   imports: [TypeOrmModule.forFeature([TemplateMessage]), WhatsappModule],
   controllers: [TemplateController],
   providers: [TemplateService],
+  exports: [TemplateService],
 })
 export class TemplateModule {}

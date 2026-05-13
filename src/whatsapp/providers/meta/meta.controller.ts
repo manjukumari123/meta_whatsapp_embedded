@@ -119,7 +119,7 @@ export class MetaController {
   handleWebhook(
     @Req() req: Request,
     @Body() payload: WebhookEventDto,
-    @Headers('x-hub-signature-256') signature: string,
+    @Headers('x-hub-signature-256') signature: string | string[],
   ) {
     const rawBody = (req as any).rawBody;
     return this.metaService.handleWebhook(payload, signature, rawBody);

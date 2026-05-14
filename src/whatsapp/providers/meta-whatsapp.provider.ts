@@ -6,6 +6,7 @@ import {
   SignupStartResponse,
   SignupCallbackResponse,
   WebhookVerificationResponse,
+  ProviderSendResponse,
 } from './whatsapp-provider.interface';
 
 @Injectable()
@@ -27,14 +28,68 @@ export class MetaWhatsAppProvider implements IWhatsAppProvider {
     this.mockAccessToken = this.configService.get<string>('META_ACCESS_TOKEN', 'mock_meta_access_token');
   }
 
-  async sendMessage(dto: SendMessageDto): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    this.logger.log(`[MetaWhatsApp] Sending message to ${dto.to}`);
-    
+  async sendMessage(dto: SendMessageDto): Promise<ProviderSendResponse> {
+    this.logger.log(
+      `[MetaWhatsApp] Sending message to ${dto.to} | retryCount: ${dto.retryCount ?? 0} | fallbackAttempt: ${dto.fallbackAttempt ?? false}`,
+    );
+
+    const payload = dto.template
+      ? {
+          messaging_product: 'whatsapp',
+          to: dto.to,
+          type: 'template',
+          template: {
+            name: dto.template.name,
+            language: dto.template.language,
+            components: dto.template.components,
+          },
+        }
+      : {
+          messaging_product: 'whatsapp',
+          to: dto.to,
+          type: 'text',
+          text: {
+            body: dto.message,
+          },
+        };
+
+    this.logger.debug(`[MetaWhatsApp] Prepared payload: ${JSON.stringify(payload)}`);
+
+    const sentAt = new Date().toISOString();
+    const attempt = dto.retryCount ?? 0;
+    const MAX_RETRIES = 3;
+
     if (this.mockMode) {
       this.logger.log('[MetaWhatsApp] Using mock mode for send message');
+      
+      // Simulate occasional failure for testing retry/fallback
+      const shouldFail = attempt === 1 && !dto.fallbackAttempt;
+      
+      if (shouldFail) {
+        this.logger.warn('[MetaWhatsApp] Simulating failure for retry testing');
+        return {
+          success: false,
+          error: 'Rate limit exceeded',
+          providerStatus: 'FAILED',
+          sentAt,
+          failureReason: 'RATE_LIMIT_EXCEEDED',
+          retryMetadata: {
+            attempt: attempt + 1,
+            maxRetries: MAX_RETRIES,
+            nextRetryIn: 5000,
+          },
+        };
+      }
+
       return {
         success: true,
-        messageId: `msg_meta_${Date.now()}`,
+        messageId: `wamid.HbL${Date.now()}@${dto.to}`,
+        providerStatus: 'SENT',
+        sentAt,
+        retryMetadata: attempt > 0 ? {
+          attempt: attempt + 1,
+          maxRetries: MAX_RETRIES,
+        } : undefined,
       };
     }
 
@@ -42,18 +97,32 @@ export class MetaWhatsAppProvider implements IWhatsAppProvider {
     this.logger.log('[MetaWhatsApp] Real Meta API call would be made here');
     return {
       success: true,
-      messageId: `msg_meta_${Date.now()}`,
+      messageId: `wamid.HbL${Date.now()}@${dto.to}`,
+      providerStatus: 'SENT',
+      sentAt,
     };
   }
 
-  async startSignup(): Promise<SignupStartResponse> {
+  async startSignup(options?: any): Promise<SignupStartResponse> {
     this.logger.log('[MetaWhatsApp] Starting embedded signup flow');
+    
+    const businessId = options?.businessId ?? 'mock-business-123';
+    const businessName = options?.businessName ?? 'Test Clinic';
+    const phoneNumber = options?.phoneNumber ?? '919999999999';
+    const state = `mock-state-${Date.now()}`;
     
     if (this.mockMode) {
       this.logger.log('[MetaWhatsApp] Using mock mode for signup start');
       return {
         success: true,
+        signupUrl: `https://www.facebook.com/dialog/oauth?mock=true&state=${state}`,
         redirectUrl: `https://www.facebook.com/v18.0/dialog/oauth?client_id=mock_client_id&redirect_uri=mock_redirect_url&scope=whatsapp_business_management`,
+        state,
+        businessId,
+        businessName,
+        phoneNumber,
+        expiresIn: 600,
+        instructions: 'Redirect the business user to signupUrl to begin onboarding.',
       };
     }
 
@@ -61,7 +130,14 @@ export class MetaWhatsAppProvider implements IWhatsAppProvider {
     this.logger.log('[MetaWhatsApp] Real Meta Embedded Signup API call would be made here');
     return {
       success: true,
+      signupUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
       redirectUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
+      state,
+      businessId,
+      businessName,
+      phoneNumber,
+      expiresIn: 600,
+      instructions: 'Redirect the business user to signupUrl to begin onboarding.',
     };
   }
 

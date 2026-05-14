@@ -21,14 +21,33 @@ export class WhatsAppProviderFactory {
       case 'MESSAGE_BIRD':
         this.logger.log('Selected MessageBird provider');
         return new MessageBirdProvider();
-      
+
       case 'META_WHATSAPP':
         this.logger.log('Selected Meta WhatsApp provider');
         return new MetaWhatsAppProvider(this.configService);
-      
+
       default:
         this.logger.error(`Unknown provider type: ${this.providerType}. Defaulting to META_WHATSAPP`);
         return new MetaWhatsAppProvider(this.configService);
+    }
+  }
+
+  createFallbackProvider(): IWhatsAppProvider {
+    this.logger.log('Creating fallback WhatsApp provider');
+
+    // Fallback to the opposite provider
+    switch (this.providerType.toUpperCase()) {
+      case 'MESSAGE_BIRD':
+        this.logger.log('Fallback to Meta WhatsApp provider');
+        return new MetaWhatsAppProvider(this.configService);
+
+      case 'META_WHATSAPP':
+        this.logger.log('Fallback to MessageBird provider');
+        return new MessageBirdProvider();
+
+      default:
+        this.logger.log('Fallback to MessageBird provider');
+        return new MessageBirdProvider();
     }
   }
 }

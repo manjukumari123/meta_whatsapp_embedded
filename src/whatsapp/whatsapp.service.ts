@@ -134,13 +134,13 @@ export class WhatsappService {
   }
 
   async verifyWebhook(mode: string, token: string, challenge: string) {
-    this.logger.log(`[WhatsappService] Verifying webhook - mode: ${mode}, token: ${token}`);
+    this.logger.log(`[WhatsappService] Verifying webhook - mode: ${mode}, token: ${token}, challenge: ${challenge}`);
     try {
       const result = await this.primaryProvider.verifyWebhook(mode, token, challenge);
       if (result.error) {
-        this.logger.warn(`[WhatsappService] Webhook verification failed: ${result.error}`);
+        this.logger.warn(`[WhatsappService] Webhook verification failed: ${result.error} | Provider: ${this.primaryProvider.getProviderName()}`);
       } else {
-        this.logger.log('[WhatsappService] Webhook verification successful');
+        this.logger.log(`[WhatsappService] Webhook verification successful | Provider: ${this.primaryProvider.getProviderName()}`);
       }
       return result;
     } catch (error) {

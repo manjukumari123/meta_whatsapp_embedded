@@ -238,11 +238,17 @@ export class NlpBookingService {
         const suggestionText = alternatives
           .map((slot) => `${slot.date} at ${slot.startTime}`)
           .join(', ');
+        const message = this.buildAlternativeSlotsMessage(
+          doctorName,
+          date,
+          entities.timePeriod,
+          suggestionText,
+        );
 
         return {
           success: false,
           intent: IntentType.BOOK_APPOINTMENT,
-          message: `I couldn't find ${entities.timePeriod} slots for ${doctorName} on ${date}. However, here are some other available times: ${suggestionText}`,
+          message,
           requiresConfirmation: true,
           entities,
           suggestions: alternatives.map((slot) => `${slot.date} at ${slot.startTime}`),
@@ -270,11 +276,17 @@ export class NlpBookingService {
       this.logger.log(
         `[SLOT_SUGGESTIONS] Providing fallback slots | count: ${fallbackSlots.length} | times: ${suggestionText}`,
       );
+      const message = this.buildAlternativeSlotsMessage(
+        doctorName,
+        date,
+        entities.timePeriod,
+        suggestionText,
+      );
 
       return {
         success: false,
         intent: IntentType.BOOK_APPOINTMENT,
-        message: `I couldn't find ${entities.timePeriod} slots for ${doctorName} on ${date}. Here are the next available times: ${suggestionText}`,
+        message,
         requiresConfirmation: true,
         entities,
         suggestions: fallbackSlots.map((slot) => `${slot.date} at ${slot.startTime}`),
@@ -484,6 +496,36 @@ export class NlpBookingService {
         time: selectedSlot.startTime,
       },
     };
+  }
+
+  /**
+   * Build a user-friendly message for slot availability.
+   * Never includes "undefined" in the message.
+   */
+  private buildSlotAvailabilityMessage(
+    doctorName: string | undefined,
+    date: string,
+    timePeriod?: string,
+  ): string {
+    const doctor = doctorName || 'doctor';
+    if (!timePeriod) {
+      return `No ${doctor} slots are available on ${date}.`;
+    }
+    return `I couldn't find ${timePeriod} slots for ${doctor} on ${date}.`;
+  }
+
+  /**
+   * Build a message with alternative slot suggestions.
+   * Never includes "undefined" in the message.
+   */
+  private buildAlternativeSlotsMessage(
+    doctorName: string | undefined,
+    date: string,
+    timePeriod: string | undefined,
+    suggestionText: string,
+  ): string {
+    const baseMessage = this.buildSlotAvailabilityMessage(doctorName, date, timePeriod);
+    return `${baseMessage} However, here are some other available times: ${suggestionText}`;
   }
 
   /**

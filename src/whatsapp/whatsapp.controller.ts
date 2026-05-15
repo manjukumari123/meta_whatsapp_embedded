@@ -163,18 +163,21 @@ export class WhatsappController {
     @Query('hub.challenge') challenge: string,
     @Res() res: Response,
   ) {
-    this.logger.log(`[Controller] GET /whatsapp/meta/webhook - mode: ${mode}, token: ${token}`);
+    this.logger.log(`[Controller] GET /whatsapp/meta/webhook - mode: ${mode}, token: ${token}, challenge: ${challenge}`);
     
     if (!mode || !token || !challenge) {
+      this.logger.error(`[Controller] Missing required parameters - mode: ${mode}, token: ${token}, challenge: ${challenge}`);
       throw new BadRequestException('hub.mode, hub.verify_token, and hub.challenge are required');
     }
 
     const result = await this.whatsappService.verifyWebhook(mode, token, challenge);
     
     if (result.error) {
+      this.logger.warn(`[Controller] Webhook verification failed: ${result.error}`);
       return res.status(HttpStatus.FORBIDDEN).send(result.error);
     }
 
+    this.logger.log('[Controller] Webhook verification successful');
     return res.status(HttpStatus.OK).send(result.challenge);
   }
 

@@ -167,16 +167,25 @@ export class MetaWhatsAppProvider implements IWhatsAppProvider {
   }
 
   async verifyWebhook(mode: string, token: string, challenge: string): Promise<WebhookVerificationResponse> {
-    this.logger.log(`[MetaWhatsApp] Verifying webhook - mode: ${mode}, token: ${token}`);
+    this.logger.log(`[MetaWhatsApp] Verifying webhook - mode: ${mode}, token: ${token}, challenge: ${challenge}`);
+    this.logger.debug(`[MetaWhatsApp] Expected verify token: ${this.verifyToken}`);
     
-    if (mode === 'subscribe' && token === this.verifyToken) {
+    // Normalize inputs
+    const normalizedMode = mode?.trim().toLowerCase();
+    const normalizedToken = token?.trim();
+    const expectedToken = this.verifyToken?.trim();
+    
+    this.logger.debug(`[MetaWhatsApp] Mode comparison: "${normalizedMode}" === "subscribe" ? ${normalizedMode === 'subscribe'}`);
+    this.logger.debug(`[MetaWhatsApp] Token comparison: "${normalizedToken}" === "${expectedToken}" ? ${normalizedToken === expectedToken}`);
+    
+    if (normalizedMode === 'subscribe' && normalizedToken === expectedToken) {
       this.logger.log('[MetaWhatsApp] Webhook verification successful');
       return {
         challenge,
       };
     }
 
-    this.logger.warn('[MetaWhatsApp] Webhook verification failed');
+    this.logger.warn(`[MetaWhatsApp] Webhook verification failed - mode: ${normalizedMode}, token match: ${normalizedToken === expectedToken}`);
     return {
       error: 'Verification failed',
     };

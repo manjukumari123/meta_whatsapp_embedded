@@ -449,6 +449,165 @@ describe('NlpBookingService', () => {
     });
   });
 
+  describe('Undefined Slots Bug Fix - No undefined in messages', () => {
+    /**
+     * Test for issue: "I need a skin doctor today" returns "I couldn't find undefined slots..."
+     * Requirement: Never show "undefined" in user-facing messages
+     */
+    it('should not include "undefined" in message when timePeriod is missing', async () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+      // User sends message without timePeriod (missing "morning/afternoon/evening")
+      const request = {
+        phoneNumber: '9876543210',
+        userMessage: 'I need a skin doctor today',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      // Message should not contain "undefined"
+      expect(response.message).not.toContain('undefined');
+      expect(response.message).toBeTruthy();
+      
+      // Should indicate it's a skin doctor request
+      expect(response.intent).toBe(IntentType.BOOK_APPOINTMENT);
+    });
+
+    it('should use generic wording when timePeriod is missing and slots unavailable', async () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+      const request = {
+        phoneNumber: '9876543211',
+        userMessage: `I need a dermatologist on ${yesterdayStr}`, // No time period, past date
+      };
+
+      const response = await service.processUserMessage(request);
+
+      // Should have generic message without "undefined"
+      expect(response.message).not.toContain('undefined');
+      expect(response.message).toBeTruthy();
+    });
+
+    it('should never include "undefined" in suggestions', async () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+      const request = {
+        phoneNumber: '9876543212',
+        userMessage: `Book Dr. Rajesh on ${tomorrowStr}`, // No time period specified
+      };
+
+      const response = await service.processUserMessage(request);
+
+      // Check message
+      expect(response.message).not.toContain('undefined');
+
+      // Check suggestions if present
+      if (response.suggestions && response.suggestions.length > 0) {
+        response.suggestions.forEach((suggestion) => {
+          expect(suggestion).not.toContain('undefined');
+        });
+      }
+    });
+
+    it('should handle missing timePeriod with alternative slot suggestions', async () => {
+      const request = {
+        phoneNumber: '9876543213',
+        userMessage: 'I need a dermatologist on Saturday', // No specific time period
+      };
+
+      const response = await service.processUserMessage(request);
+
+      // Should not contain undefined in message
+      expect(response.message).not.toContain('undefined');
+      
+      // If alternatives are provided, they should not contain undefined
+      if (response.suggestions && response.suggestions.length > 0) {
+        response.suggestions.forEach((suggestion) => {
+          expect(suggestion).not.toContain('undefined');
+        });
+      }
+
+      if (response.availableSlots && response.availableSlots.length > 0) {
+        response.availableSlots.forEach((slot) => {
+          expect(slot.startTime).toBeTruthy();
+          expect(slot.endTime).toBeTruthy();
+        });
+      }
+    });
+
+    it('should include only morning/afternoon/evening if explicitly provided', async () => {
+      // Test with morning specified
+      const request1 = {
+        phoneNumber: '9876543214',
+        userMessage: 'I need a skin doctor tomorrow morning',
+      };
+
+      const response1 = await service.processUserMessage(request1);
+      expect(response1.message).not.toContain('undefined');
+      if (response1.message.includes('couldn\'t find')) {
+        // If no morning slots, should say "I couldn't find morning slots"
+        expect(response1.message).toContain('morning');
+        expect(response1.message).not.toContain('undefined');
+      }
+
+      // Test with evening specified
+      const request2 = {
+        phoneNumber: '9876543215',
+        userMessage: 'I need a cardiologist tomorrow evening',
+      };
+
+      const response2 = await service.processUserMessage(request2);
+      expect(response2.message).not.toContain('undefined');
+      if (response2.message.includes('couldn\'t find')) {
+        expect(response2.message).toContain('evening');
+        expect(response2.message).not.toContain('undefined');
+      }
+
+      // Test without time period
+      const request3 = {
+        phoneNumber: '9876543216',
+        userMessage: 'I need a dentist tomorrow',
+      };
+
+      const response3 = await service.processUserMessage(request3);
+      expect(response3.message).not.toContain('undefined');
+      expect(response3.message).not.toContain('morning');
+      expect(response3.message).not.toContain('afternoon');
+      expect(response3.message).not.toContain('evening');
+    });
+
+    it('should maintain conversational flow while fixing undefined bug', async () => {
+      const phoneNumber = '9876543217';
+
+      // Step 1: User asks for dermatologist without time period
+      const request1 = {
+        phoneNumber,
+        userMessage: 'I need a skin doctor today',
+      };
+
+      const response1 = await service.processUserMessage(request1);
+      expect(response1.message).not.toContain('undefined');
+
+      // Step 2: User should be able to select from suggestions
+      const pending = contextService.getPendingConfirmation(phoneNumber);
+      if (pending && response1.requiresConfirmation) {
+        const request2 = {
+          phoneNumber,
+          userMessage: 'Book 16:00 slot', // Select a slot
+        };
+
+        const response2 = await service.processUserMessage(request2);
+        expect(response2.message).not.toContain('undefined');
+      }
+    });
+  });
+
   describe('Error Handling', () => {
     it('should handle invalid doctor', async () => {
       const request = {

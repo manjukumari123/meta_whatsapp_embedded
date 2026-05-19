@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { WhatsappService } from 'src/whatsapp/whatsapp.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { SendTemplateDto } from './dto/send-template.dto';
 import { DeliveryStatusDto } from './dto/delivery-status.dto';
 

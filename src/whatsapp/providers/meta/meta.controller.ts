@@ -43,8 +43,25 @@ export class StartSignupDto {
 
 export class SignupCallbackDto {
   @ApiProperty({
+    example: 'auth_code_123',
+    description: 'Authorization code from Meta',
+  })
+  @IsString()
+  @IsNotEmpty()
+  code: string;
+
+  @ApiProperty({
+    example: 'state-abc-123',
+    description: 'State token for CSRF protection',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  state?: string;
+
+  @ApiProperty({
     example: false,
-    description: 'Set to true to simulate a signup failure',
+    description: 'Set to true to simulate a signup failure (testing only)',
     required: false,
   })
   @IsOptional()
@@ -53,7 +70,7 @@ export class SignupCallbackDto {
 
   @ApiProperty({
     example: 'ACCESS_DENIED',
-    description: 'Error code returned on failure',
+    description: 'Error code returned on failure (testing only)',
     required: false,
     enum: ['ACCESS_DENIED', 'USER_DENIED', 'TOKEN_EXPIRED', 'INVALID_SCOPE'],
   })
@@ -102,26 +119,34 @@ export class MetaController {
 
   @Post('signup/callback')
   @ApiOperation({
-    summary: 'Mock Meta signup callback',
+    summary: 'Handle Meta signup callback',
     description:
-      'Simulates the callback after business completes Meta onboarding. Set fail=true to simulate failure.',
+      'Processes the callback after business completes Meta onboarding. Validates state token for security.',
   })
   @ApiBody({
     type: SignupCallbackDto,
     examples: {
       success: {
         summary: 'Successful callback request',
-        value: { fail: false },
+        value: {
+          code: 'auth_code_123',
+          state: 'signup-1779210000000-abc123',
+        },
       },
       failure: {
-        summary: 'Failure callback request',
-        value: { fail: true, errorCode: 'ACCESS_DENIED' },
+        summary: 'Failure callback request (testing)',
+        value: {
+          code: 'auth_code_123',
+          state: 'signup-1779210000000-abc123',
+          fail: true,
+          errorCode: 'ACCESS_DENIED',
+        },
       },
     },
   })
   @ApiResponse({
     status: 200,
-    description: 'Returns mock onboarding credentials on success or an error on failure.',
+    description: 'Returns Meta onboarding credentials on success.',
     schema: {
       example: {
         success: true,

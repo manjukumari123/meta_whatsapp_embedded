@@ -51,26 +51,6 @@ export class WebhookMessage {
   type: string;
 }
 
-export class WebhookEntry {
-  @IsString()
-  id: string;
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => WebhookChange)
-  changes: WebhookChange[];
-}
-
-export class WebhookChange {
-  @IsString()
-  field: string;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => WebhookValue)
-  value?: WebhookValue;
-}
-
 export class WebhookValue {
   @IsString()
   messaging_product: string;
@@ -99,6 +79,26 @@ export class WebhookValue {
     display_phone_number: string;
     phone_number_id: string;
   };
+}
+
+export class WebhookEntry {
+  @IsString()
+  id: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WebhookChange)
+  changes: WebhookChange[];
+}
+
+export class WebhookChange {
+  @IsString()
+  field: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => WebhookValue)
+  value?: WebhookValue;
 }
 
 export class WebhookStatus {

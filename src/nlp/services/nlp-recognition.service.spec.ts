@@ -1,13 +1,37 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NlpRecognitionService } from '../services/nlp-recognition.service';
 import { IntentType } from '../enums/intent.enum';
+import { StructuredLoggingService } from '../../logging/services/structured-logging.service';
 
 describe('NlpRecognitionService', () => {
   let service: NlpRecognitionService;
 
   beforeEach(async () => {
+    const mockStructuredLoggingService = {
+      logIntentDetection: jest.fn(),
+      logEntityExtraction: jest.fn(),
+      logBookingFlow: jest.fn(),
+      logCancellationFlow: jest.fn(),
+      logRescheduleFlow: jest.fn(),
+      logSlotAllocation: jest.fn(),
+      logAlternateSlotSuggestion: jest.fn(),
+      logApiFailure: jest.fn(),
+      logRetry: jest.fn(),
+      logEscalation: jest.fn(),
+      logFlowTransition: jest.fn(),
+      logContextSwitch: jest.fn(),
+      logFallbackTrigger: jest.fn(),
+      logWorkflowStep: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [NlpRecognitionService],
+      providers: [
+        NlpRecognitionService,
+        {
+          provide: StructuredLoggingService,
+          useValue: mockStructuredLoggingService,
+        },
+      ],
     }).compile();
 
     service = module.get<NlpRecognitionService>(NlpRecognitionService);

@@ -1,4 +1,4 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { IWhatsAppProvider } from './providers/whatsapp-provider.interface';
 import { WhatsAppProviderFactory } from './providers/whatsapp-provider.factory';
 
@@ -9,6 +9,8 @@ export class WhatsappService {
   private readonly fallbackProvider: IWhatsAppProvider;
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAY_MS = 1000;
+  private readonly STATE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+  private readonly signupStates = new Map<string, { createdAt: Date; expiresAt: Date }>();
 
   constructor(private providerFactory: WhatsAppProviderFactory) {
     this.primaryProvider = this.providerFactory.createProvider();
@@ -33,13 +35,48 @@ export class WhatsappService {
     to: string,
     message?: string,
     template?: any,
+  ): Promise<any> {
+    // Try primary provider with retries
+    try {
+      const primaryResult = await this.sendWithRetry(
+        this.primaryProvider,
+        to,
+        message,
+        template,
+        false,
+      );
+      return primaryResult;
+    } catch (primaryError) {
+      this.logger.log(`[WhatsappService] Primary provider failed after all retries, switching to fallback provider`);
+      
+      // Try fallback provider with retries
+      try {
+        const fallbackResult = await this.sendWithRetry(
+          this.fallbackProvider,
+          to,
+          message,
+          template,
+          true,
+        );
+        return fallbackResult;
+      } catch (fallbackError) {
+        this.logger.error(`[WhatsappService] Both primary and fallback providers failed`);
+        throw new Error('Failed to send message after all retries with both providers');
+      }
+    }
+  }
+
+  private async sendWithRetry(
+    provider: IWhatsAppProvider,
+    to: string,
+    message?: string,
+    template?: any,
+    isFallback: boolean = false,
     retryCount: number = 0,
   ): Promise<any> {
-    const provider = retryCount >= this.MAX_RETRIES ? this.fallbackProvider : this.primaryProvider;
-    const isFallbackAttempt = retryCount >= this.MAX_RETRIES;
-
+    const providerName = provider.getProviderName();
     this.logger.log(
-      `[WhatsappService] Attempt ${retryCount + 1}/${this.MAX_RETRIES + 1} | Provider: ${provider.getProviderName()} | Fallback: ${isFallbackAttempt}`,
+      `[WhatsappService] Attempt ${retryCount + 1}/${this.MAX_RETRIES} | Provider: ${providerName} | Fallback: ${isFallback}`,
     );
 
     try {
@@ -48,57 +85,43 @@ export class WhatsappService {
         message,
         template,
         retryCount,
-        fallbackAttempt: isFallbackAttempt,
+        fallbackAttempt: isFallback,
       });
 
       if (result.success) {
         this.logger.log(
-          `[WhatsappService] Message sent successfully via ${provider.getProviderName()} | messageId: ${result.messageId}`,
+          `[WhatsappService] Message sent successfully via ${providerName} | messageId: ${result.messageId}`,
         );
         return {
           ...result,
-          provider: provider.getProviderName(),
+          provider: providerName,
           retryCount,
-          fallbackAttempt: isFallbackAttempt,
+          fallbackAttempt: isFallback,
         };
       }
 
       this.logger.warn(
-        `[WhatsappService] Send failed via ${provider.getProviderName()} | error: ${result.error} | failureReason: ${result.failureReason}`,
+        `[WhatsappService] Send failed via ${providerName} | error: ${result.error} | failureReason: ${result.failureReason}`,
       );
 
-      // Check if we should retry
-      if (retryCount < this.MAX_RETRIES && result.retryMetadata) {
-        const delay = result.retryMetadata.nextRetryIn || this.RETRY_DELAY_MS;
+      // Retry if we haven't exhausted retries
+      if (retryCount < this.MAX_RETRIES - 1) {
+        const delay = result.retryMetadata?.nextRetryIn || this.RETRY_DELAY_MS;
         this.logger.log(`[WhatsappService] Retrying in ${delay}ms...`);
         await this.sleep(delay);
-        return this.sendMessageWithRetry(to, message, template, retryCount + 1);
+        return this.sendWithRetry(provider, to, message, template, isFallback, retryCount + 1);
       }
 
-      // If primary provider failed after retries, try fallback
-      if (retryCount < this.MAX_RETRIES) {
-        this.logger.log(`[WhatsappService] Primary provider exhausted, switching to fallback provider`);
-        await this.sleep(this.RETRY_DELAY_MS);
-        return this.sendMessageWithRetry(to, message, template, this.MAX_RETRIES);
-      }
-
-      // All attempts failed
-      throw new Error(result.error || 'Failed to send message after all retries and fallback');
+      // All retries exhausted for this provider
+      throw new Error(result.error || `Failed to send message via ${providerName} after ${this.MAX_RETRIES} retries`);
     } catch (error) {
-      this.logger.error(`[WhatsappService] Error in sendMessageWithRetry: ${error.message}`);
+      this.logger.error(`[WhatsappService] Error in sendWithRetry: ${error.message}`);
       
-      // If not a max retry scenario, retry
-      if (retryCount < this.MAX_RETRIES) {
+      // Retry if we haven't exhausted retries
+      if (retryCount < this.MAX_RETRIES - 1) {
         this.logger.log(`[WhatsappService] Retrying due to exception...`);
         await this.sleep(this.RETRY_DELAY_MS);
-        return this.sendMessageWithRetry(to, message, template, retryCount + 1);
-      }
-
-      // If primary failed, try fallback
-      if (retryCount < this.MAX_RETRIES) {
-        this.logger.log(`[WhatsappService] Primary provider exhausted due to exception, switching to fallback`);
-        await this.sleep(this.RETRY_DELAY_MS);
-        return this.sendMessageWithRetry(to, message, template, this.MAX_RETRIES);
+        return this.sendWithRetry(provider, to, message, template, isFallback, retryCount + 1);
       }
 
       throw error;
@@ -112,7 +135,17 @@ export class WhatsappService {
   async startSignup(options?: any) {
     this.logger.log('[WhatsappService] Starting signup flow');
     try {
-      const result = await this.primaryProvider.startSignup(options);
+      // Generate unique state
+      const state = `signup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const createdAt = new Date();
+      const expiresAt = new Date(createdAt.getTime() + this.STATE_EXPIRY_MS);
+
+      // Store state with expiry
+      this.signupStates.set(state, { createdAt, expiresAt });
+      this.logger.log(`[WhatsappService] Created signup state: ${state} | expiresAt: ${expiresAt.toISOString()}`);
+
+      // Pass state to provider
+      const result = await this.primaryProvider.startSignup({ ...options, state });
       this.logger.log(`[WhatsappService] Signup started: ${result.success}`);
       return result;
     } catch (error) {
@@ -122,9 +155,38 @@ export class WhatsappService {
   }
 
   async handleCallback(code: string, state?: string) {
-    this.logger.log(`[WhatsappService] Handling callback with code: ${code}`);
+    this.logger.log(`[WhatsappService] Handling callback with code: ${code}, state: ${state}`);
+    
+    // Validate state
+    if (!state) {
+      this.logger.error('[WhatsappService] Callback missing state parameter');
+      throw new BadRequestException('Missing state parameter');
+    }
+
+    const stateRecord = this.signupStates.get(state);
+    
+    if (!stateRecord) {
+      this.logger.error(`[WhatsappService] Unknown state: ${state}`);
+      throw new BadRequestException('Invalid or expired state');
+    }
+
+    // Check if state has expired
+    const now = new Date();
+    if (now > stateRecord.expiresAt) {
+      this.logger.error(`[WhatsappService] State expired: ${state} | expiresAt: ${stateRecord.expiresAt.toISOString()}`);
+      this.signupStates.delete(state);
+      throw new BadRequestException('State has expired');
+    }
+
+    this.logger.log(`[WhatsappService] State validated: ${state}`);
+
     try {
       const result = await this.primaryProvider.handleCallback(code, state);
+      
+      // Delete state after successful callback to prevent reuse
+      this.signupStates.delete(state);
+      this.logger.log(`[WhatsappService] State deleted after successful callback: ${state}`);
+      
       this.logger.log(`[WhatsappService] Callback handled: ${result.success}`);
       return result;
     } catch (error) {

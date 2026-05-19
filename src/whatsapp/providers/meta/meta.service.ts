@@ -1,10 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import * as crypto from 'crypto';
+import { WhatsappService } from '../../whatsapp.service';
 import { WebhookEventDto } from './dto/webhook-event.dto';
-import { SignupState } from './entities/signup-state.entity';
 
 @Injectable()
 export class MetaService {
@@ -12,8 +9,7 @@ export class MetaService {
 
   constructor(
     private readonly configService: ConfigService,
-    @InjectRepository(SignupState)
-    private readonly signupStateRepo: Repository<SignupState>,
+    private readonly whatsappService: WhatsappService,
   ) {}
 
   async startSignup(body: {
@@ -21,33 +17,14 @@ export class MetaService {
     businessName?: string;
     phoneNumber?: string;
   }) {
-    const state = `mock-state-${crypto.randomUUID()}`;
-    const record = this.signupStateRepo.create({
-      state,
-      businessId: body.businessId ?? 'mock-business-001',
-      businessName: body.businessName ?? 'Mock Business',
-      phoneNumber: body.phoneNumber ?? 'mock-phone-number',
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-    });
-
-    await this.signupStateRepo.save(record);
-
-    this.logger.log(`Created mock signup state for ${record.businessId}`);
-
-    return {
-      success: true,
-      signupUrl: `https://www.facebook.com/dialog/oauth?mock=true&state=${state}`,
-      state,
-      businessId: record.businessId,
-      businessName: record.businessName,
-      phoneNumber: record.phoneNumber,
-      expiresIn: 600,
-    };
+    this.logger.log('[MetaService] Delegating to WhatsappService for signup start');
+    return this.whatsappService.startSignup(body);
   }
 
-  async signupCallback(body: { fail?: boolean; errorCode?: string }) {
-    this.logger.log('Received mock signup callback');
-
+  async signupCallback(body: { code?: string; state?: string; fail?: boolean; errorCode?: string }) {
+    this.logger.log('[MetaService] Delegating to WhatsappService for signup callback');
+    
+    // Handle mock failure mode for testing
     if (body.fail) {
       return {
         success: false,
@@ -56,25 +33,19 @@ export class MetaService {
       };
     }
 
-    return {
-      success: true,
-      message: 'Mock signup completed successfully',
-    };
+    if (!body.code) {
+      throw new BadRequestException('code is required');
+    }
+
+    return this.whatsappService.handleCallback(body.code, body.state);
   }
 
   verifyWebhook(query: Record<string, string>) {
-    const verifyToken = this.configService.get<string>('WEBHOOK_VERIFY_TOKEN');
+    this.logger.log('[MetaService] Delegating to WhatsappService for webhook verification');
     const mode = query['hub.mode'];
     const token = query['hub.verify_token'];
     const challenge = query['hub.challenge'];
-
-    if (mode !== 'subscribe' || token !== verifyToken) {
-      this.logger.warn('Meta webhook verification failed');
-      throw new BadRequestException('Invalid webhook verification request');
-    }
-
-    this.logger.log('Meta webhook verification success');
-    return challenge;
+    return this.whatsappService.verifyWebhook(mode, token, challenge);
   }
 
   handleWebhook(
@@ -82,9 +53,12 @@ export class MetaService {
     signature: string | string[],
     rawBody: Buffer | string,
   ) {
+    this.logger.log('[MetaService] Delegating to WhatsappService for webhook handling');
+    
+    // Validate signature if app secret is configured
     const appSecret = this.configService.get<string>('META_APP_SECRET');
-
-    if (appSecret) {
+    if (appSecret && rawBody) {
+      const crypto = require('crypto');
       const raw = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
       const expectedSignature = `sha256=${crypto
         .createHmac('sha256', appSecret)
@@ -98,10 +72,6 @@ export class MetaService {
       }
     }
 
-    this.logger.log('Received mock Meta webhook event');
-    return {
-      success: true,
-      received: payload,
-    };
+    return this.whatsappService.handleWebhook(payload);
   }
 }

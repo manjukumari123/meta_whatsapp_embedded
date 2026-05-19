@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import { TemplateService } from './template.service';
-import { WhatsappService } from 'src/whatsapp/whatsapp.service';
-import { WhatsAppProviderFactory } from 'src/whatsapp/providers/whatsapp-provider.factory';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { WhatsAppProviderFactory } from '../whatsapp/providers/whatsapp-provider.factory';
 
 describe('TemplateService', () => {
   let service: TemplateService;

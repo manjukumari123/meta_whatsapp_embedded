@@ -109,7 +109,7 @@ export class MetaWhatsAppProvider implements IWhatsAppProvider {
     const businessId = options?.businessId ?? 'mock-business-123';
     const businessName = options?.businessName ?? 'Test Clinic';
     const phoneNumber = options?.phoneNumber ?? '919999999999';
-    const state = `mock-state-${Date.now()}`;
+    const state = options?.state ?? `mock-state-${Date.now()}`;
     
     if (this.mockMode) {
       this.logger.log('[MetaWhatsApp] Using mock mode for signup start');

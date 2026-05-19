@@ -1,10 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { IntentType } from '../enums/intent.enum';
 import { NlpAnalysisResult, ExtractedEntity } from '../dto/nlp-analysis.dto';
+import { StructuredLoggingService } from '../../logging/services/structured-logging.service';
 
 @Injectable()
 export class NlpRecognitionService {
   private readonly logger = new Logger(NlpRecognitionService.name);
+
+  constructor(private readonly structuredLogger: StructuredLoggingService) {}
 
   private readonly bookingKeywords = [
     'book',
@@ -19,6 +22,15 @@ export class NlpRecognitionService {
     'today',
     'next',
     'with',
+    // Hindi keywords
+    'book',
+    'appointment',
+    'kal',
+    'aaj',
+    'karna',
+    'karo',
+    'chahiye',
+    'hai',
   ];
 
   private readonly cancellationKeywords = [
@@ -30,6 +42,44 @@ export class NlpRecognitionService {
     'reschedule',
     'postpone',
     'appointment',
+    // Hindi keywords
+    'cancel',
+    'delete',
+    'hatana',
+    'radd',
+  ];
+
+  private readonly rescheduleKeywords = [
+    'reschedule',
+    'change',
+    'move',
+    'shift',
+    'postpone',
+    'different',
+    'instead',
+    'actually',
+    'rather',
+    // Hindi keywords
+    'badl',
+    'change',
+    'shift',
+  ];
+
+  private readonly escalationKeywords = [
+    'human',
+    'agent',
+    'person',
+    'talk',
+    'speak',
+    'help',
+    'support',
+    'escalate',
+    'manager',
+    'supervisor',
+    // Hindi keywords
+    'insan',
+    'madad',
+    'help',
   ];
 
   private readonly viewKeywords = [
@@ -83,7 +133,7 @@ export class NlpRecognitionService {
   /**
    * Analyzes user text and returns intent and extracted entities
    */
-  analyzeUserInput(userText: string): NlpAnalysisResult {
+  analyzeUserInput(userText: string, sessionId?: string, phoneNumber?: string): NlpAnalysisResult {
     const cleanText = this.normalizeText(userText);
     this.logger.log(`Analyzing input | original: ${userText} | normalized: ${cleanText}`);
 
@@ -104,6 +154,25 @@ export class NlpRecognitionService {
     this.logger.log(
       `Analysis complete | intent: ${result.intent} | confidence: ${result.confidence} | entities: ${JSON.stringify(entities)}`,
     );
+
+    // Log intent detection
+    this.structuredLogger.logIntentDetection({
+      sessionId,
+      phoneNumber,
+      userMessage: userText,
+      detectedIntent: intent,
+      confidence,
+      status: intent === IntentType.FALLBACK ? 'FALLBACK' : 'SUCCESS',
+    });
+
+    // Log entity extraction
+    this.structuredLogger.logEntityExtraction({
+      sessionId,
+      phoneNumber,
+      intent,
+      entities,
+      status: Object.keys(entities).length > 0 ? 'SUCCESS' : (confidence < 0.7 ? 'PARTIAL' : 'FAILURE'),
+    });
 
     return result;
   }
@@ -133,6 +202,19 @@ export class NlpRecognitionService {
     normalized = normalized.replace(/ur/g, 'your');
     normalized = normalized.replace(/b4/g, 'before');
 
+    // Handle Hindi keywords (transliteration)
+    normalized = normalized.replace(/kal/g, 'tomorrow');
+    normalized = normalized.replace(/aaj/g, 'today');
+    normalized = normalized.replace(/karna/g, 'book');
+    normalized = normalized.replace(/karo/g, 'book');
+    normalized = normalized.replace(/chahiye/g, 'need');
+    normalized = normalized.replace(/hai/g, '');
+    normalized = normalized.replace(/hatana/g, 'cancel');
+    normalized = normalized.replace(/radd/g, 'cancel');
+    normalized = normalized.replace(/badl/g, 'change');
+    normalized = normalized.replace(/insan/g, 'human');
+    normalized = normalized.replace(/madad/g, 'help');
+
     return normalized;
   }
 
@@ -145,9 +227,25 @@ export class NlpRecognitionService {
       .map((token) => token.replace(/[^a-z0-9]/g, ''))
       .filter(Boolean);
 
-    // Check for explicit cancellation keywords (highest priority)
+    // Check for escalation intent (highest priority - user wants human)
+    const escalationMatched = words.some((w) =>
+      this.escalationKeywords.includes(w),
+    );
+    if (escalationMatched) {
+      return IntentType.ESCALATE_TO_AGENT;
+    }
+
+    // Check for reschedule intent (context continuation with "actually", "instead", etc.)
+    const rescheduleMatched = words.some((w) =>
+      this.rescheduleKeywords.includes(w),
+    );
+    if (rescheduleMatched) {
+      return IntentType.RESCHEDULE_APPOINTMENT;
+    }
+
+    // Check for explicit cancellation keywords
     const cancellationMatched = words.some((w) =>
-      ['cancel', 'delete', 'remove', 'refund', 'reschedule', 'postpone'].includes(w),
+      ['cancel', 'delete', 'remove', 'refund', 'postpone'].includes(w),
     );
 
     if (cancellationMatched) {

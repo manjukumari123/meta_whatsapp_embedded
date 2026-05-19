@@ -38,6 +38,12 @@ export class NlpBookingResponseDto {
       upcomingBookings: [],
       availableSlots: [],
       suggestions: [],
+      oldDate: '2026-05-14',
+      oldTime: '10:00 AM',
+      newDate: '2026-05-15',
+      newTime: '10:30 AM',
+      escalationRequested: false,
+      escalationTime: '2026-05-14T10:00:00Z',
     },
     description: 'Optional structured booking metadata returned by the assistant',
   })
@@ -49,6 +55,12 @@ export class NlpBookingResponseDto {
     upcomingBookings?: any[];
     availableSlots?: any[];
     suggestions?: any[];
+    oldDate?: string;
+    oldTime?: string;
+    newDate?: string;
+    newTime?: string;
+    escalationRequested?: boolean;
+    escalationTime?: string;
   };
 
   @ApiPropertyOptional({

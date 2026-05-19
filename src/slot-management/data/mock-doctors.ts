@@ -91,6 +91,66 @@ export const MOCK_DOCTORS: DoctorSchedule[] = [
     ],
     unavailablePeriods: [],
   },
+  {
+    doctorId: 'doc-5',
+    name: 'Dr. Sarah Johnson',
+    specialization: 'skin specialist',
+    slotDuration: 30,
+    dailyBookingLimit: 10,
+    availableTimings: [
+      {
+        startTime: '09:00',
+        endTime: '13:00',
+        daysOfWeek: [1, 2, 3, 4, 5], // Mon-Fri
+      },
+      {
+        startTime: '15:00',
+        endTime: '18:00',
+        daysOfWeek: [1, 2, 3, 4, 5], // Mon-Fri
+      },
+    ],
+    unavailablePeriods: [],
+  },
+  {
+    doctorId: 'doc-6',
+    name: 'Dr. Michael Chen',
+    specialization: 'physician',
+    slotDuration: 30,
+    dailyBookingLimit: 15,
+    availableTimings: [
+      {
+        startTime: '08:00',
+        endTime: '12:00',
+        daysOfWeek: [1, 2, 3, 4, 5, 6], // Mon-Sat
+      },
+      {
+        startTime: '14:00',
+        endTime: '18:00',
+        daysOfWeek: [1, 2, 3, 4, 5], // Mon-Fri
+      },
+    ],
+    unavailablePeriods: [],
+  },
+  {
+    doctorId: 'doc-7',
+    name: 'Dr. Emily Wilson',
+    specialization: 'general doctor',
+    slotDuration: 30,
+    dailyBookingLimit: 15,
+    availableTimings: [
+      {
+        startTime: '09:00',
+        endTime: '13:00',
+        daysOfWeek: [1, 2, 3, 4, 5, 6], // Mon-Sat
+      },
+      {
+        startTime: '15:00',
+        endTime: '19:00',
+        daysOfWeek: [1, 2, 3, 4, 5], // Mon-Fri
+      },
+    ],
+    unavailablePeriods: [],
+  },
 ];
 
 export const MOCK_BOOKINGS = [

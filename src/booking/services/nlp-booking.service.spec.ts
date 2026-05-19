@@ -44,6 +44,29 @@ describe('NlpBookingService', () => {
       expect(response.success || response.requiresConfirmation).toBe(true);
     });
 
+    it('should process booking request with mixed Hindi/English', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'Kal dermatologist appointment book karo',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.BOOK_APPOINTMENT);
+      expect(response.success || response.requiresConfirmation).toBe(true);
+    });
+
+    it('should handle typos in booking request', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'I need a docter tmrw for skin issue',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.BOOK_APPOINTMENT);
+    });
+
     const findNextEveningDate = (): string => {
       const start = new Date();
       for (let offset = 1; offset <= 14; offset += 1) {
@@ -1063,6 +1086,121 @@ describe('NlpBookingService', () => {
       const response2 = await service.processUserMessage(request2);
       expect(response2.intent).toBe(IntentType.BOOK_APPOINTMENT);
       expect(response2.entities?.specialization).toBe('cardiologist');
+    });
+  });
+
+  describe('Reschedule Flow', () => {
+    it('should detect reschedule intent with context continuation', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'Actually reschedule it to Friday',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.RESCHEDULE_APPOINTMENT);
+    });
+
+    it('should handle reschedule with new date and time', async () => {
+      const phoneNumber = '1234567890-reschedule';
+
+      // First book an appointment
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+      const bookRequest = {
+        phoneNumber,
+        userMessage: `Book appointment with Dr. Rajesh on ${tomorrowStr} at 10:00`,
+      };
+
+      const bookResponse = await service.processUserMessage(bookRequest);
+
+      // Then reschedule
+      const nextWeek = new Date();
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      const nextWeekStr = nextWeek.toISOString().split('T')[0];
+
+      const rescheduleRequest = {
+        phoneNumber,
+        userMessage: `Actually change it to ${nextWeekStr} at 11:00`,
+      };
+
+      const rescheduleResponse = await service.processUserMessage(rescheduleRequest);
+
+      expect(rescheduleResponse.intent).toBe(IntentType.RESCHEDULE_APPOINTMENT);
+    });
+
+    it('should handle reschedule with mixed language', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'Badl kar do Friday ko',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.RESCHEDULE_APPOINTMENT);
+    });
+  });
+
+  describe('Escalation Flow', () => {
+    it('should detect escalation intent', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'I want to talk to a human agent',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.ESCALATE_TO_AGENT);
+      expect(response.success).toBe(true);
+      expect(response.data?.escalationRequested).toBe(true);
+    });
+
+    it('should handle escalation with Hindi keywords', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'Mujhe insan se baat karni hai',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.ESCALATE_TO_AGENT);
+    });
+
+    it('should handle escalation with help keywords', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'Madad chahiye',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.ESCALATE_TO_AGENT);
+    });
+  });
+
+  describe('Mixed Language Support', () => {
+    it('should handle Hindi date keywords', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'Aaj appointment book karo dermatologist ke liye',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.BOOK_APPOINTMENT);
+    });
+
+    it('should handle Hindi cancellation keywords', async () => {
+      const request = {
+        phoneNumber: '1234567890',
+        userMessage: 'Hatana appointment',
+      };
+
+      const response = await service.processUserMessage(request);
+
+      expect(response.intent).toBe(IntentType.CANCEL_APPOINTMENT);
     });
   });
 });

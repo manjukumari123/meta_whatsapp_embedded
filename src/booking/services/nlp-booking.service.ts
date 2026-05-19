@@ -5,6 +5,7 @@ import { Slot } from '../../slot-management/entities/slot.entity';
 import { ConversationContextService } from '../../conversation/services/conversation-context.service';
 import { NlpBookingRequestDto, NlpBookingResponseDto } from '../dto/nlp-booking.dto';
 import { IntentType } from '../../nlp/enums/intent.enum';
+import { StructuredLoggingService } from '../../logging/services/structured-logging.service';
 
 interface PendingSlotConfirmation {
   doctorId: string;
@@ -32,6 +33,7 @@ export class NlpBookingService {
     private readonly nlpService: NlpRecognitionService,
     private readonly slotService: SlotManagementService,
     private readonly contextService: ConversationContextService,
+    private readonly structuredLogger: StructuredLoggingService,
   ) {}
 
   /**
@@ -57,7 +59,7 @@ export class NlpBookingService {
     const context = this.contextService.getContext(phoneNumber);
 
     // Analyze intent and extract entities
-    const nlpResult = this.nlpService.analyzeUserInput(userMessage);
+    const nlpResult = this.nlpService.analyzeUserInput(userMessage, context.sessionId, phoneNumber);
     const pendingConfirmation = this.contextService.getPendingConfirmation(phoneNumber);
     const pendingCancellation = this.contextService.getPendingCancellation(phoneNumber);
     const isPendingCancellationSelection =
@@ -77,6 +79,17 @@ export class NlpBookingService {
       ? IntentType.BOOK_APPOINTMENT
       : nlpResult.intent;
 
+    // Check for context switching (intent change from previous)
+    if (context.lastIntent && context.lastIntent !== intent && intent !== IntentType.FALLBACK) {
+      this.structuredLogger.logContextSwitch({
+        sessionId: context.sessionId,
+        phoneNumber,
+        previousIntent: context.lastIntent,
+        newIntent: intent,
+        trigger: 'user_intent_change',
+      });
+    }
+
     // Merge with previous context if needed
     const mergedEntities = this.contextService.mergeEntities(
       phoneNumber,
@@ -95,30 +108,50 @@ export class NlpBookingService {
           phoneNumber,
           mergedEntities,
           nlpResult.extractedEntities,
+          context.sessionId,
         );
         break;
 
       case IntentType.CANCEL_APPOINTMENT:
-        response = await this.handleCancellationFlow(phoneNumber, mergedEntities);
+        response = await this.handleCancellationFlow(phoneNumber, mergedEntities, context.sessionId);
+        break;
+
+      case IntentType.RESCHEDULE_APPOINTMENT:
+        response = await this.handleRescheduleFlow(phoneNumber, mergedEntities, context.sessionId);
         break;
 
       case IntentType.VIEW_APPOINTMENTS:
-        response = await this.handleViewAppointments(phoneNumber);
+        response = await this.handleViewAppointments(phoneNumber, context.sessionId);
         break;
 
       case IntentType.CHECK_SLOTS:
-        response = await this.handleCheckSlots(mergedEntities);
+        response = await this.handleCheckSlots(mergedEntities, context.sessionId, phoneNumber);
+        break;
+
+      case IntentType.ESCALATE_TO_AGENT:
+        response = await this.handleEscalationToAgent(phoneNumber, context.sessionId);
         break;
 
       default:
+        // Log fallback trigger
+        this.structuredLogger.logFallbackTrigger({
+          sessionId: context.sessionId,
+          phoneNumber,
+          intent: nlpResult.intent,
+          reason: 'Unrecognized intent or low confidence',
+          fallbackType: 'NO_UNDERSTANDING',
+          retryCount: 0,
+        });
+
         response = {
           success: false,
           intent: IntentType.FALLBACK,
           message:
-            "I didn't understand that. You can:\n- Book an appointment (e.g., 'Book appointment with Dr. Rajesh')\n- Cancel an appointment (e.g., 'Cancel my appointment')\n- Check available slots\n- View my bookings",
+            "I didn't understand that. You can:\n- Book an appointment (e.g., 'Book appointment with Dr. Rajesh')\n- Cancel an appointment (e.g., 'Cancel my appointment')\n- Reschedule an appointment (e.g., 'Actually reschedule to Friday')\n- Check available slots\n- View my bookings\n- Talk to a human agent",
           suggestions: [
             'Try: I need a skin doctor tomorrow evening',
             'Try: Show me available slots for a dentist',
+            'Try: I want to talk to a human agent',
           ],
         };
     }
@@ -137,10 +170,18 @@ export class NlpBookingService {
     phoneNumber: string,
     entities: any,
     extractedEntities: any,
+    sessionId?: string,
   ): Promise<NlpBookingResponseDto> {
     this.logger.log(
       `[INTENT_DETECTION] BOOK_APPOINTMENT | phoneNumber: ${phoneNumber} | entities: ${JSON.stringify(entities)} | extractedEntities: ${JSON.stringify(extractedEntities)}`,
     );
+
+    this.structuredLogger.logBookingFlow({
+      sessionId,
+      phoneNumber,
+      event: 'START',
+      status: 'START',
+    });
 
     const pendingConfirmation = this.contextService.getPendingConfirmation(phoneNumber);
     if (
@@ -557,10 +598,18 @@ export class NlpBookingService {
   private async handleCancellationFlow(
     phoneNumber: string,
     entities: any,
+    sessionId?: string,
   ): Promise<NlpBookingResponseDto> {
     this.logger.log(
       `[INTENT_DETECTION] CANCEL_APPOINTMENT | phoneNumber: ${phoneNumber} | entities: ${JSON.stringify(entities)}`,
     );
+
+    this.structuredLogger.logCancellationFlow({
+      sessionId,
+      phoneNumber,
+      event: 'START',
+      status: 'START',
+    });
 
     if (entities.appointmentId) {
       this.logger.log(
@@ -747,6 +796,7 @@ export class NlpBookingService {
    */
   private async handleViewAppointments(
     phoneNumber: string,
+    sessionId?: string,
   ): Promise<NlpBookingResponseDto> {
     this.logger.log(
       `[INTENT_DETECTION] VIEW_APPOINTMENTS | phoneNumber: ${phoneNumber}`,
@@ -796,10 +846,184 @@ export class NlpBookingService {
   }
 
   /**
+   * Handle reschedule appointment
+   */
+  private async handleRescheduleFlow(
+    phoneNumber: string,
+    entities: any,
+    sessionId?: string,
+  ): Promise<NlpBookingResponseDto> {
+    this.logger.log(
+      `[INTENT_DETECTION] RESCHEDULE_APPOINTMENT | phoneNumber: ${phoneNumber} | entities: ${JSON.stringify(entities)}`,
+    );
+
+    this.structuredLogger.logRescheduleFlow({
+      sessionId,
+      phoneNumber,
+      event: 'START',
+      status: 'START',
+    });
+
+    // Get upcoming bookings to identify which one to reschedule
+    const bookings = this.slotService.getPatientBookings(phoneNumber);
+    this.logger.log(
+      `[RESCHEDULE] Found bookings | phoneNumber: ${phoneNumber} | upcoming: ${bookings.upcomingBookings.length}`,
+    );
+
+    if (bookings.upcomingBookings.length === 0) {
+      return {
+        success: false,
+        intent: IntentType.RESCHEDULE_APPOINTMENT,
+        message: 'You have no upcoming appointments to reschedule',
+      };
+    }
+
+    // If user specified a time/date, try to reschedule the first upcoming booking
+    if (entities.date || entities.time || entities.timePeriod) {
+      const bookingToReschedule = bookings.upcomingBookings[0];
+      const newDate = entities.date || bookingToReschedule.date;
+      const newTime = entities.time || bookingToReschedule.startTime;
+
+      this.logger.log(
+        `[RESCHEDULE] Attempting reschedule | bookingId: ${bookingToReschedule.bookingId} | newDate: ${newDate} | newTime: ${newTime}`,
+      );
+
+      // Check availability for new slot
+      const availability = this.slotService.getAvailableSlots(
+        bookingToReschedule.doctorId,
+        newDate,
+      );
+
+      if (availability.reason) {
+        return {
+          success: false,
+          intent: IntentType.RESCHEDULE_APPOINTMENT,
+          message: `Cannot reschedule to ${newDate}: ${availability.reason}`,
+          entities,
+        };
+      }
+
+      const slotAvailable = availability.slots.some(
+        (slot) => slot.startTime === newTime,
+      );
+
+      if (!slotAvailable) {
+        const availableSlots = availability.slots
+          .slice(0, 3)
+          .map((s) => s.startTime)
+          .join(', ');
+        return {
+          success: false,
+          intent: IntentType.RESCHEDULE_APPOINTMENT,
+          message: `Slot ${newTime} on ${newDate} is not available. Available slots: ${availableSlots}`,
+          entities,
+          suggestions: availability.slots.slice(0, 3).map((s) => `${newDate} at ${s.startTime}`),
+        };
+      }
+
+      // Cancel existing booking
+      const cancelResult = this.slotService.cancelAppointment(
+        bookingToReschedule.bookingId,
+        phoneNumber,
+      );
+
+      if (!cancelResult.success) {
+        return {
+          success: false,
+          intent: IntentType.RESCHEDULE_APPOINTMENT,
+          message: `Could not cancel original booking: ${cancelResult.message}`,
+        };
+      }
+
+      // Book new appointment
+      const bookResult = this.slotService.bookAppointment(
+        bookingToReschedule.doctorId,
+        newDate,
+        newTime,
+        bookingToReschedule.patientName,
+        phoneNumber,
+      );
+
+      if (!bookResult.success) {
+        // Rollback - restore original booking
+        this.slotService.bookAppointment(
+          bookingToReschedule.doctorId,
+          bookingToReschedule.date,
+          bookingToReschedule.startTime,
+          bookingToReschedule.patientName,
+          phoneNumber,
+        );
+        return {
+          success: false,
+          intent: IntentType.RESCHEDULE_APPOINTMENT,
+          message: `Could not book new slot: ${bookResult.message}. Original booking has been restored.`,
+        };
+      }
+
+      return {
+        success: true,
+        intent: IntentType.RESCHEDULE_APPOINTMENT,
+        message: `Appointment rescheduled successfully from ${bookingToReschedule.date} at ${bookingToReschedule.startTime} to ${newDate} at ${newTime}`,
+        data: {
+          bookingId: bookResult.bookingId,
+          doctorName: bookingToReschedule.doctorName,
+          oldDate: bookingToReschedule.date,
+          oldTime: bookingToReschedule.startTime,
+          newDate,
+          newTime,
+        },
+      };
+    }
+
+    // Ask which booking to reschedule
+    const bookingsList = bookings.upcomingBookings
+      .map((b) => `${b.doctorName} on ${b.date} at ${b.startTime}`)
+      .join('\n');
+
+    return {
+      success: false,
+      intent: IntentType.RESCHEDULE_APPOINTMENT,
+      message: `Your upcoming appointments:\n${bookingsList}\n\nWhich appointment would you like to reschedule? Please specify the new date and time.`,
+      requiresConfirmation: true,
+      entities,
+    };
+  }
+
+  /**
+   * Handle escalation to human agent
+   */
+  private async handleEscalationToAgent(
+    phoneNumber: string,
+    sessionId?: string,
+  ): Promise<NlpBookingResponseDto> {
+    this.logger.log(
+      `[INTENT_DETECTION] ESCALATE_TO_AGENT | phoneNumber: ${phoneNumber}`,
+    );
+
+    this.structuredLogger.logEscalation({
+      sessionId,
+      phoneNumber,
+      status: 'START',
+    });
+
+    return {
+      success: true,
+      intent: IntentType.ESCALATE_TO_AGENT,
+      message: 'I understand you would like to speak with a human agent. Our support team will contact you shortly at your registered phone number.',
+      data: {
+        escalationRequested: true,
+        escalationTime: new Date().toISOString(),
+      },
+    };
+  }
+
+  /**
    * Handle check slots
    */
   private async handleCheckSlots(
     entities: any,
+    sessionId?: string,
+    phoneNumber?: string,
   ): Promise<NlpBookingResponseDto> {
     this.logger.log(
       `[INTENT_DETECTION] CHECK_SLOTS | entities: ${JSON.stringify(entities)}`,

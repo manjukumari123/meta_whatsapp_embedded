@@ -9,6 +9,7 @@ import { ConversationModule } from './conversation/conversation.module';
 import { BookingModule } from './booking/booking.module';
 import { AppointmentModule } from './appointment/appointment.module';
 import { TemplateModule } from './template/template.module';
+import { HealthcareModule } from './healthcare/healthcare.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { TemplateModule } from './template/template.module';
     SlotManagementModule,
     ConversationModule,
     BookingModule,
+    HealthcareModule,
   ],
   controllers: [AppController],
   providers: [AppService],

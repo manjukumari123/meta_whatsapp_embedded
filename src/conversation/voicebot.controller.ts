@@ -50,6 +50,41 @@ export class VoicebotController {
     }
 
     this.workflowsService.initializeWorkflow(body.phoneNumber, workflow.workflowId);
+
+    // Handle reschedule workflow: check if user has multiple bookings
+    if (body.intent === IntentType.RESCHEDULE_APPOINTMENT) {
+      const upcomingBookings = this.healthcareService.getUpcomingBookingsByPhone(body.phoneNumber);
+
+      if (upcomingBookings.length === 0) {
+        this.workflowsService.clearWorkflowState(body.phoneNumber);
+        return {
+          success: false,
+          error: 'No upcoming appointments found',
+        };
+      }
+
+      if (upcomingBookings.length === 1) {
+        // Only one booking, skip selection step and proceed to new-date
+        const booking = upcomingBookings[0];
+        this.workflowsService.updateWorkflowState(body.phoneNumber, {
+          currentStepIndex: 2, // Skip list-appointments and select-appointment, go to new-date
+          collectedData: {
+            appointmentId: booking.bookingId,
+            doctorName: booking.doctorId,
+            date: booking.date,
+          },
+        });
+      } else {
+        // Multiple bookings, show them to user
+        const bookingList = upcomingBookings.map((b, index) =>
+          `${index + 1}. ${b.doctorId} on ${b.date} at ${b.startTime} (ID: ${b.bookingId})`,
+        ).join('\n');
+        this.workflowsService.updateWorkflowState(body.phoneNumber, {
+          collectedData: { upcomingBookings },
+        });
+      }
+    }
+
     const prompt = this.workflowsService.getCurrentStepPrompt(body.phoneNumber);
 
     // Log workflow start
@@ -64,8 +99,11 @@ export class VoicebotController {
     return {
       success: true,
       workflowId: workflow.workflowId,
-      currentStep: 0,
+      currentStep: this.workflowsService.getWorkflowState(body.phoneNumber)?.currentStepIndex || 0,
       prompt,
+      upcomingBookings: body.intent === IntentType.RESCHEDULE_APPOINTMENT
+        ? this.healthcareService.getUpcomingBookingsByPhone(body.phoneNumber)
+        : undefined,
     };
   }
 
@@ -147,7 +185,85 @@ export class VoicebotController {
     // Collect data from NLP entities
     state.collectedData = { ...state.collectedData, ...nlpResult.extractedEntities };
 
-    // Advance to next step
+    // Handle appointment selection for reschedule workflow
+    if (nlpResult.intent === IntentType.RESCHEDULE_APPOINTMENT && state.currentStepIndex === 1) {
+      // User is at select-appointment step
+      const upcomingBookings = state.collectedData.upcomingBookings as any[];
+      if (upcomingBookings && upcomingBookings.length > 1) {
+        // Match user input to one of the appointments
+        const selectedBooking = this.matchAppointmentSelection(body.userMessage, upcomingBookings, nlpResult.extractedEntities);
+
+        if (!selectedBooking) {
+          // Selection didn't match, retry
+          const retryPrompt = this.workflowsService.handleRetry(body.phoneNumber);
+          const currentState = this.workflowsService.getWorkflowState(body.phoneNumber);
+
+          if (!retryPrompt) {
+            return {
+              success: false,
+              error: 'Max retries exceeded. Please start a new workflow.',
+            };
+          }
+
+          return {
+            success: true,
+            retry: true,
+            retryCount: currentState?.retryCount || 0,
+            prompt: retryPrompt,
+            collectedData: state.collectedData,
+          };
+        }
+
+        // Selection successful, store the selected appointment
+        state.collectedData.appointmentId = selectedBooking.bookingId;
+        state.collectedData.doctorName = selectedBooking.doctorId;
+        state.collectedData.date = selectedBooking.date;
+      }
+    }
+
+    // Validate if required input was captured before advancing
+    const validation = this.workflowsService.validateStepInput(body.phoneNumber, state.collectedData);
+
+    if (!validation.valid) {
+      // Required input is missing, retry current step
+      const retryPrompt = this.workflowsService.handleRetry(body.phoneNumber);
+      const currentState = this.workflowsService.getWorkflowState(body.phoneNumber);
+
+      if (!retryPrompt) {
+        // Max retries exceeded
+        this.structuredLogger.logFallbackTrigger({
+          phoneNumber: body.phoneNumber,
+          intent: undefined,
+          reason: 'Max retries exceeded - missing required input',
+          fallbackType: 'MAX_RETRIES',
+          retryCount: currentState?.retryCount,
+        });
+
+        return {
+          success: false,
+          error: 'Max retries exceeded. Please start a new workflow.',
+        };
+      }
+
+      this.structuredLogger.logRetry({
+        phoneNumber: body.phoneNumber,
+        operation: 'workflow_step_validation',
+        attempt: currentState?.retryCount || 0,
+        maxRetries: 2,
+        reason: `Missing required input: ${validation.missingFields?.join(', ')}`,
+      });
+
+      return {
+        success: true,
+        retry: true,
+        retryCount: currentState?.retryCount || 0,
+        prompt: retryPrompt,
+        collectedData: state.collectedData,
+        missingFields: validation.missingFields,
+      };
+    }
+
+    // Validation passed, advance to next step
     const advanced = this.workflowsService.advanceToNextStep(body.phoneNumber);
     const nextPrompt = this.workflowsService.getCurrentStepPrompt(body.phoneNumber);
 
@@ -427,5 +543,71 @@ export class VoicebotController {
       return !!(collectedData.date && collectedData.time);
     }
     return false;
+  }
+
+  /**
+   * Match user input to an appointment from the list
+   * Supports matching by: booking ID, doctor name, date, or slot number/index
+   */
+  private matchAppointmentSelection(userInput: string, bookings: any[], entities: any): any | null {
+    const lowerInput = userInput.toLowerCase();
+
+    // Check by appointmentId entity
+    if (entities.appointmentId) {
+      const match = bookings.find((b) => b.bookingId === entities.appointmentId);
+      if (match) return match;
+    }
+
+    // Check by doctorName entity
+    if (entities.doctorName) {
+      const match = bookings.find((b) => b.doctorId.toLowerCase().includes(entities.doctorName.toLowerCase()));
+      if (match) return match;
+    }
+
+    // Check by date entity
+    if (entities.date) {
+      const match = bookings.find((b) => b.date === entities.date);
+      if (match) return match;
+    }
+
+    // Check by slot number/index (e.g., "1", "first", "option 1")
+    const slotMatch = lowerInput.match(/^(\d+|first|second|third|fourth|fifth)/i);
+    if (slotMatch) {
+      let index = 0;
+      const word = slotMatch[1].toLowerCase();
+      if (word === 'first') index = 0;
+      else if (word === 'second') index = 1;
+      else if (word === 'third') index = 2;
+      else if (word === 'fourth') index = 3;
+      else if (word === 'fifth') index = 4;
+      else index = parseInt(word) - 1;
+
+      if (index >= 0 && index < bookings.length) {
+        return bookings[index];
+      }
+    }
+
+    // Check by booking ID in input string
+    for (const booking of bookings) {
+      if (lowerInput.includes(booking.bookingId.toLowerCase())) {
+        return booking;
+      }
+    }
+
+    // Check by doctor name in input string
+    for (const booking of bookings) {
+      if (lowerInput.includes(booking.doctorId.toLowerCase())) {
+        return booking;
+      }
+    }
+
+    // Check by date in input string
+    for (const booking of bookings) {
+      if (lowerInput.includes(booking.date)) {
+        return booking;
+      }
+    }
+
+    return null;
   }
 }

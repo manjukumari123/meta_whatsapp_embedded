@@ -117,6 +117,37 @@ export class VoicebotWorkflowsService {
   }
 
   /**
+   * Validate if required input was captured for the current step
+   * If multiple expected inputs are provided, at least one must be present (OR logic)
+   */
+  validateStepInput(phoneNumber: string, collectedData: any): { valid: boolean; missingFields?: string[] } {
+    const state = this.workflowStates.get(phoneNumber);
+    if (!state) return { valid: false };
+
+    const workflow = this.getWorkflowById(state.workflowId);
+    if (!workflow) return { valid: false };
+
+    const currentStep = workflow.steps[state.currentStepIndex];
+    if (!currentStep || !currentStep.expectedInput || currentStep.expectedInput.length === 0) {
+      // No expected input required for this step
+      return { valid: true };
+    }
+
+    // Check if at least one expected input is present (OR logic)
+    const hasAtLeastOne = currentStep.expectedInput.some((expected) => collectedData[expected]);
+
+    if (hasAtLeastOne) {
+      return { valid: true };
+    }
+
+    // All expected inputs are missing
+    return {
+      valid: false,
+      missingFields: currentStep.expectedInput,
+    };
+  }
+
+  /**
    * Advance to next step
    */
   advanceToNextStep(phoneNumber: string): boolean {
@@ -292,12 +323,20 @@ export class VoicebotWorkflowsService {
       intent: IntentType.RESCHEDULE_APPOINTMENT,
       steps: [
         {
-          stepId: 'identify-appointment',
+          stepId: 'list-appointments',
           prompt:
-            'I can help you reschedule your appointment. Please provide your booking ID or say "my appointments" to see your bookings.',
-          expectedInput: ['appointmentId'],
+            'I can help you reschedule your appointment. Please provide your booking ID, or say "my appointments" to see your upcoming appointments.',
+          expectedInput: [],
           fallbackPrompt:
             'Please provide your booking ID or say "my appointments" to view your upcoming appointments.',
+          maxRetries: 2,
+        },
+        {
+          stepId: 'select-appointment',
+          prompt: 'Please select the appointment you want to reschedule by providing the booking ID, doctor name, or date.',
+          expectedInput: ['appointmentId', 'doctorName', 'date'],
+          fallbackPrompt:
+            'Please select an appointment by providing the booking ID, doctor name, or date.',
           maxRetries: 2,
         },
         {

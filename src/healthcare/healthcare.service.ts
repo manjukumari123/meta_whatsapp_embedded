@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SlotManagementService } from 'src/slot-management/services/slot-management.service';
-import { DoctorSchedule, BookingRecord } from 'src/slot-management/entities/slot.entity';
+import { SlotManagementService } from '../slot-management/services/slot-management.service';
+import { DoctorSchedule, BookingRecord } from '../slot-management/entities/slot.entity';
 import { BookAppointmentDto } from './dto/book-appointment.dto';
 import { CancelAppointmentDto } from './dto/cancel-appointment.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
@@ -110,6 +110,17 @@ export class HealthcareService {
   private getBookingsByDoctorAndDate(doctorId: string, date: string): BookingRecord[] {
     return this.bookings.filter(
       (b) => b.doctorId === doctorId && b.date === date && b.status === 'CONFIRMED',
+    );
+  }
+
+  /**
+   * Helper method to get upcoming bookings by phone number
+   */
+  getUpcomingBookingsByPhone(phoneNumber: string): BookingRecord[] {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return this.bookings.filter(
+      (b) => b.patientPhone === phoneNumber && b.status === 'CONFIRMED' && new Date(b.date) >= today,
     );
   }
 
@@ -426,6 +437,7 @@ export class HealthcareService {
     const bookedSlots = this.getBookingsByDoctorAndDate(doctor.doctorId, dto.date).length;
 
     const slotResponses: SlotResponse[] = result.slots.map((slot) => ({
+      date: dto.date,
       startTime: slot.startTime,
       endTime: slot.endTime,
       available: slot.isAvailable,
@@ -484,6 +496,7 @@ export class HealthcareService {
     );
 
     const slotResponses: SlotResponse[] = result.map((slot) => ({
+      date: slot.date,
       startTime: slot.startTime,
       endTime: slot.endTime,
       available: slot.isAvailable,

@@ -1,6 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 export class SlotResponse {
+  @ApiProperty({ example: '2026-05-20', description: 'Slot date' })
+  date: string;
+
   @ApiProperty({ example: '09:00', description: 'Slot start time' })
   startTime: string;
 
